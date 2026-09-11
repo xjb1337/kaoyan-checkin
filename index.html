@@ -305,13 +305,13 @@ async function syncInit(){
     if(j&&j.state)S=mergeState(S,j.state);
     S.upd=Math.max(S.upd,(j&&j.updatedAt)||0);
     persist();
-    if(S!==before)syncPush();
     syncOn=true;
+    if(S!==before)syncPush();
   }catch(e){syncOn=false}
   render();
 }
 function syncPush(){
-  if(!canSync)return;
+  if(!canSync||!syncOn)return;
   fetch('api/state',{method:'PUT',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({updatedAt:S.upd,state:S})}).catch(()=>{});
 }
