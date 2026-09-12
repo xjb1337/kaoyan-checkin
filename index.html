@@ -151,11 +151,11 @@ details.mi p{margin:8px 0 2px;font-size:13px;color:var(--sub)}
 <script>
 'use strict';
 /* ================= 基础数据 ================= */
-const START='2026-09-01'; // 计划起始日
+const START='2026-09-14'; // 计划起始日（开营：2026-09-14 周一）
 const W={id:'words',label:'背单词 50-80 个',tag:'英语',min:1};
 const D={id:'drill',label:'西综刷题 10 道（医考帮/蓝基因）',tag:'西综',min:1};
 const PHASES=[
- {id:0,s:'2026-09-01',e:'2027-01-31',name:'阶段0 · 启动期',desc:'生理一轮 + 单词打底（每天 2-3h）',tasks:[W,D,
+ {id:0,s:'2026-09-14',e:'2027-01-31',name:'阶段0 · 启动期',desc:'生理一轮 + 单词打底（每天 2-3h）',tasks:[W,D,
   {id:'phy',label:'生理 · 网课 + 讲义同步',tag:'西综'},
   {id:'phyt',label:'生理 · 章节真题 + 错题登记',tag:'西综'},
   {id:'sent',label:'长难句 3-5 句（12 月起加）',tag:'英语'}]},
@@ -359,6 +359,8 @@ function vToday(){
     <button data-act="dnow" ${isToday?'disabled style="opacity:.35"':''}>今天</button>
   </div>`;
   html+=phaseCard(ds);
+  const toStart=dayDiff(START,today());
+  if(toStart>0)html+=`<div class="minline" style="background:rgba(37,99,235,.12);color:var(--ac)">🎯 ${START.slice(5).replace('-','/')}（周一）正式开营，还有 ${toStart} 天 · 想提前开始也行，打卡照算</div>`;
   if(!S.tip)html+=`<div class="card" style="border-left:4px solid var(--ac)">
     <b>📱 装到手机上（安卓）：</b>Chrome 打开本页 → 右上角 ⋮ 菜单 → 「添加到主屏幕」或「安装应用」。数据保存在手机本机，换手机用「设置 → 备份与恢复」搬家。
     <div style="margin-top:8px"><button class="btn" data-act="tipoff">知道了</button></div></div>`;
@@ -483,9 +485,9 @@ function vMile(){
   let html=`<div class="card">
     <div class="ph"><span class="nm">备考全程进度</span><span class="rg">${START} ~ ${ex}</span></div>
     <div class="pgwrap" style="height:10px"><div class="pg" style="width:${pct}%"></div></div>
-    <div class="phds" style="margin-top:8px">已走完 ${pct}% · ${days>=0?'距初试还有 '+days+' 天':'初试已结束'} · 起步到初试共 ${dayDiff(ex,START)} 天</div>
+    <div class="phds" style="margin-top:8px">已走完 ${pct}% · ${days>=0?'距初试还有 '+days+' 天':'初试已结束'}${toStart>0?' · 距开营 '+toStart+' 天':''} · 起步到初试共 ${dayDiff(ex,START)} 天</div>
   </div>`;
-  const ms=MILES.slice().sort((a,b)=>(a[0]||ex).localeCompare(b[0]||ex));
+  const ms=[[START,'正式开营（周一）','从这天起进入阶段0：生理一轮 + 单词打底。开营前想提前启动也可以，统计不受影响。']].concat(MILES).sort((a,b)=>(a[0]||ex).localeCompare(b[0]||ex));
   html+='<div class="card"><h3>关键节点与检查点</h3>'+ms.map(([d,ti,txt])=>{
     const dd=dayDiff(d||ex,t);
     const chip=dd>0?`还有 ${dd} 天`:(dd===0?'就是今天':'已过 '+(-dd)+' 天');
