@@ -1,4 +1,4 @@
-const C='kaoyan-v3';
+const C='kaoyan-v4';
 const ASSETS=['./','./index.html','./manifest.webmanifest','./icon-180.png','./icon-512.png'];
 // 安装时用 cache:'reload' 绕过浏览器 HTTP 缓存，确保预缓存的是最新版本
 self.addEventListener('install',e=>{
