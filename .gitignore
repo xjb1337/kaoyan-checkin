@@ -1,0 +1,15 @@
+# 个人打卡数据（绝不能提交：含学习记录、复盘、成绩）
+state.json
+state.json.bak
+state.json.corrupt
+
+# 测试与临时文件
+__test.html
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+
+# macOS
+.DS_Store

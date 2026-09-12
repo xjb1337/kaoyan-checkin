@@ -1,0 +1,13 @@
+{
+  "name": "考研打卡 2028",
+  "short_name": "考研打卡",
+  "description": "2028 考研备考打卡系统：五阶段任务、最低完成线、周目标、热力图与节点倒计时",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f2f4f7",
+  "theme_color": "#2563eb",
+  "icons": [
+    {"src": "icon-180.png", "sizes": "180x180", "type": "image/png"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}
