@@ -13,3 +13,7 @@ __pycache__/
 
 # macOS
 .DS_Store
+
+# 手机导出的个人备份
+kaoyan-checkin-*.json
+kaoyan-original-*.json

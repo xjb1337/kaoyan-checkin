@@ -1,26 +1,70 @@
-const C='kaoyan-v4';
-const ASSETS=['./','./index.html','./manifest.webmanifest','./icon-180.png','./icon-512.png'];
-// 安装时用 cache:'reload' 绕过浏览器 HTTP 缓存，确保预缓存的是最新版本
-self.addEventListener('install',e=>{
-  e.waitUntil(caches.open(C).then(c=>Promise.all(
-    ASSETS.map(u=>fetch(u,{cache:'reload'}).then(r=>{if(r.ok)c.put(u,r.clone())}))
-  )).then(()=>self.skipWaiting()));
+const CACHE_PREFIX = 'kaoyan-v';
+const C = `${CACHE_PREFIX}5`;
+const ASSETS = ['./', './index.html', './core.js', './views.js', './manifest.webmanifest', './icon-180.png', './icon-512.png'];
+const API_URL = new URL('./api', self.registration.scope);
+
+// 任一资源下载或写入失败都会阻止安装；旧版本仅在新版本激活后清理。
+self.addEventListener('install', event => {
+  event.waitUntil(caches.open(C).then(cache => Promise.all(
+    ASSETS.map(async url => {
+      const response = await fetch(url, { cache: 'reload' });
+      if (!response.ok) throw new Error(`Precache failed: ${url} (${response.status})`);
+      await cache.put(url, response);
+    })
+  )));
 });
-self.addEventListener('activate',e=>{
-  e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));
-});
-self.addEventListener('fetch',e=>{
-  const u=new URL(e.request.url);
-  if(u.pathname.indexOf('/api/')===0)return; // 同步接口不走缓存
-  if(e.request.mode==='navigate'){
-    // 导航：联网时强制取最新（绕过 HTTP 缓存），断网时回退到缓存
-    e.respondWith(fetch(e.request,{cache:'reload'}).then(r=>{
-      const cl=r.clone();caches.open(C).then(c=>c.put('./index.html',cl));return r;
-    }).catch(()=>caches.match('./index.html').then(r=>r||caches.match('./'))));
-  }else{
-    e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(r=>{
-      if(r.ok&&u.origin===location.origin){const cl=r.clone();caches.open(C).then(c=>c.put(e.request,cl))}
-      return r;
-    })));
+
+self.addEventListener('message', event => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    event.waitUntil(self.skipWaiting());
   }
+});
+
+self.addEventListener('activate', event => {
+  event.waitUntil(caches.keys().then(keys => Promise.all(
+    keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== C)
+      .map(key => caches.delete(key))
+  )).then(() => self.clients.claim()));
+});
+
+function shellUnavailable() {
+  return new Response('App cache is incomplete. Please reconnect and update the app.', {
+    status: 503,
+    headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' },
+  });
+}
+
+function navigate(event) {
+  // App shell 只在新版 SW 安装时写入；导航不得绕过 waiting 更新确认。
+  event.respondWith(caches.open(C).then(async cache => {
+    return await cache.match('./index.html') || await cache.match('./') || shellUnavailable();
+  }));
+}
+
+self.addEventListener('fetch', event => {
+  const request = event.request;
+  const url = new URL(request.url);
+  if (request.method !== 'GET') return;
+  if (url.origin === API_URL.origin &&
+      (url.pathname === API_URL.pathname || url.pathname.startsWith(`${API_URL.pathname}/`))) return;
+
+  if (request.mode === 'navigate') {
+    navigate(event);
+    return;
+  }
+
+  // 预缓存资源固定在当前版本，包括带查询参数的引用。
+  const asset = ASSETS.find(path => {
+    const pinned = new URL(path, self.registration.scope);
+    return url.origin === pinned.origin && url.pathname === pinned.pathname;
+  });
+  if (asset) {
+    event.respondWith(caches.open(C).then(async cache => {
+      return await cache.match(asset) || shellUnavailable();
+    }));
+    return;
+  }
+
+  // 非 app shell 资源正常联网，不把其它版本资源补写进固定版本缓存。
+  event.respondWith(fetch(request));
 });
