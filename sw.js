@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'kaoyan-v';
-const C = `${CACHE_PREFIX}5`;
+const C = `${CACHE_PREFIX}6`;
 const ASSETS = ['./', './index.html', './core.js', './views.js', './manifest.webmanifest', './icon-180.png', './icon-512.png'];
 const API_URL = new URL('./api', self.registration.scope);
 

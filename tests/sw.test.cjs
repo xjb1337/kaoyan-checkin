@@ -4,7 +4,7 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
 const SCOPE = 'https://example.github.io/kaoyan-checkin/';
-const CURRENT = 'kaoyan-v5';
+const CURRENT = 'kaoyan-v6';
 const ASSETS = ['./', './index.html', './core.js', './views.js', './manifest.webmanifest', './icon-180.png', './icon-512.png'];
 const html = (body = 'new') => new Response(body, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 function deferred() {
@@ -12,7 +12,7 @@ function deferred() {
   const promise = new Promise(yes => { resolve = yes; });
   return { promise, resolve };
 }
-function harness({ fetch = async () => html(), put = async () => {}, stores = new Map(), version = '5' } = {}) {
+function harness({ fetch = async () => html(), put = async () => {}, stores = new Map(), version = '6' } = {}) {
   const listeners = new Map();
   const calls = { fetch: [], put: [], skipWaiting: 0, claim: 0 };
   const key = value => new URL(typeof value === 'string' ? value : value.url, SCOPE).href;
@@ -37,7 +37,7 @@ function harness({ fetch = async () => html(), put = async () => {}, stores = ne
       }
     },
   };
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../sw.js'), 'utf8').replace('${CACHE_PREFIX}5', '${CACHE_PREFIX}' + version), {
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../sw.js'), 'utf8').replace('${CACHE_PREFIX}6', '${CACHE_PREFIX}' + version), {
     URL, Response, Request, location: new URL(`${SCOPE}sw.js`), caches,
     fetch: (...args) => { calls.fetch.push(args); return fetch(...args); },
     self: {
@@ -93,15 +93,15 @@ for (const failure of ['404', 'network', 'write']) {
       },
       put: async url => { if (failure === 'write' && url === './icon-512.png') throw new Error('quota'); },
     });
-    await h.seed('kaoyan-v4', './index.html', html('old'));
+    await h.seed('kaoyan-v5', './index.html', html('old'));
     await assert.rejects(h.dispatch('install').done);
-    assert.equal(await (await (await h.caches.open('kaoyan-v4')).match('./index.html')).text(), 'old');
+    assert.equal(await (await (await h.caches.open('kaoyan-v5')).match('./index.html')).text(), 'old');
     assert.equal(h.calls.skipWaiting, 0);
   });
 }
 test('activate removes only obsolete app caches', async () => {
   const h = harness();
-  for (const name of ['kaoyan-v3', 'kaoyan-v4', CURRENT, 'other-app-v1', 'kaoyan-notes-v1']) await h.caches.open(name);
+  for (const name of ['kaoyan-v3', 'kaoyan-v4', 'kaoyan-v5', CURRENT, 'other-app-v1', 'kaoyan-notes-v1']) await h.caches.open(name);
   await h.dispatch('activate').done;
   assert.deepEqual([...h.stores.keys()], [CURRENT, 'other-app-v1', 'kaoyan-notes-v1']);
   assert.equal(h.calls.claim, 1);
@@ -191,7 +191,7 @@ for (const failed of [false, true]) {
     const active = harness({ stores, fetch: async () => html('HTML-B') });
     await active.seed(CURRENT, './index.html', html('HTML-A'));
     await active.seed(CURRENT, './core.js', new Response('Core-A'));
-    const waiting = harness({ stores, version: '6', fetch: async url => {
+    const waiting = harness({ stores, version: '7', fetch: async url => {
       if (url === './core.js') return new Response('Core-B', { status: failed ? 404 : 200 });
       return html('HTML-B');
     } });
