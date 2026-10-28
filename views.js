@@ -2,7 +2,7 @@
 /* 页面与备份交互。共享 index.html 中的状态，不在加载时读写数据。 */
 /* ================= 今日 ================= */
 function phaseCard(ds){
-  const p=phaseOf(ds);
+  const p=ds<START&&(ds>=today()||!dayRec(ds))?PHASES[0]:phaseOf(ds);
   const total=dayDiff(p.e,p.s)+1,passed=clamp(dayDiff(ds,p.s)+1,0,total);
   const pct=Math.round(passed/total*100);
   return `<div class="card">
@@ -12,6 +12,7 @@ function phaseCard(ds){
   </div>`;
 }
 function minlineHTML(ds){
+  if(ds<START&&(ds>=today()||!dayRec(ds)))return `<div class="minline info" id="minline">计划从 ${START} 开始，之前不计欠打卡。</div>`;
   const p=phaseOf(ds),mc=minCount(ds),mx=minMax(p),ok=satisfied(ds),mkup=isMakeup(ds);
   const ym=ds.slice(0,7),isPast=ds<today();
   if(mkup)return `<div class="minline ok" id="minline">🩹 已用补签卡保住这天（本月还剩 ${mkLeft(ym)} 张）</div>`;
@@ -33,7 +34,7 @@ function vToday(){
   const doneN=list.filter(x=>isDone(rec,x.id)).length;
   let html=`<div class="daynav">
     <button data-act="dprev">‹</button>
-    <input type="date" value="${ds}" data-field="seldate" min="${addD(START,-60)}">
+    <input type="date" value="${ds}" data-field="seldate" min="${addD(HISTORY_START,-60)}">
     <button data-act="dnext" ${isToday?'disabled style="opacity:.35"':''}>›</button>
     <button data-act="dnow" ${isToday?'disabled style="opacity:.35"':''}>今天</button>
   </div>`;
@@ -43,6 +44,8 @@ function vToday(){
   html+=`<div style="display:none" id="bkwarn" class="minline info">💾 记得备份到手机外 · <button class="btn" data-act="tab" data-tab="set">去备份</button></div>`;
   html+=minlineHTML(ds);
   html+=`<div class="card"><h3 id="taskhd">今日任务 ${doneN}/${list.length}${future?'（未来日期，仅供预览）':''}</h3>`;
+  if(!list.length&&ds<START)html+='<div class="tip">新计划尚未开始；可以先休息或自行准备学习资料。</div>';
+  else if(ds>=START)html+='<div class="tip">两项最低线优先；其余是阶段参考，按每周安排选择，不必每天全部完成。</div>';
   html+=list.map(x=>{
     const on=isDone(rec,x.id);const custom=x.id.indexOf('r:')===0||x.id.indexOf('c:')===0;
     return `<div class="task ${on?'done':''}" role="checkbox" aria-checked="${on}" aria-disabled="${future}" tabindex="${future?-1:0}" data-act="tg" data-id="${esc(x.id)}">
@@ -68,6 +71,8 @@ function vToday(){
   html+='</div>';
   html+=`<details class="card stage-details"><summary>阶段计划与安装帮助</summary>${phaseCard(ds)}
     <p class="tip">安卓 Chrome → ⋮ →「安装应用」或「添加到主屏幕」。安装后在设置中确认离线资源就绪。</p>
+    <p class="tip">英语已学约1000词：分批复习，记忆稳定后再增加新词。可参考英语20–30分钟、西综40–60分钟、余下时间做阅读或复盘；每周根据实际情况调整。</p>
+    <p class="tip">每天1–2小时覆盖全部科目可能偏紧。请每月结合进度与可投入时间调整；模考和完整套卷可安排较长时段。</p>
     <p class="tip">本机保存不等于云备份。换手机前请导出 JSON，并保存到网盘或发给自己。</p></details>`;
   return html;
 }
@@ -168,7 +173,8 @@ function weekRate(wk){
   let done=0,total=0;
   for(let i=0;i<7;i++){
     const ds=addD(wk,i);if(ds>today())break;
-    const rec=dayRec(ds);const list=tasksFor(ds);
+    const rec=dayRec(ds);const all=tasksFor(ds);
+    const list=phaseOf(ds).fs?all:all.filter(x=>x.min);
     total+=list.length;done+=list.filter(x=>isDone(rec,x.id)).length;
   }
   return total?Math.round(done/total*100):0;
@@ -177,6 +183,7 @@ function weekStats(wk){
   let days=0,h=0,tgt=0,elapsed=0;
   for(let i=0;i<7;i++){
     const ds=addD(wk,i);if(ds>today())break;
+    if(ds<START&&!dayRec(ds))continue;
     elapsed++;
     if(satisfied(ds))days++;
     const r=dayRec(ds);h+=(r&&r.h)||0;tgt+=goalH(ds);
@@ -207,7 +214,7 @@ function vWeek(){
     <button data-act="wnow" ${isThis?'disabled style="opacity:.35"':''}>本周</button>
   </div>`;
   html+=`<div class="card">
-    <div class="ph"><span class="nm">本周完成率</span><span class="rg" style="font-size:20px;font-weight:800;color:var(--ac)">${rate}%</span></div>
+    <div class="ph"><span class="nm">本周最低线完成率</span><span class="rg" style="font-size:20px;font-weight:800;color:var(--ac)">${rate}%</span></div>
     <div class="pgwrap"><div class="pg" style="width:${rate}%"></div></div>
     <div class="phds" style="margin-top:8px">打卡达标 ${st.days}/${st.elapsed} 天 · 时长 ${st.h.toFixed(1)}h / 目标 ${st.tgt.toFixed(1)}h</div>
   </div>`;
@@ -255,8 +262,10 @@ function vStats(){
     `<div class="bw"><div class="bar ${h<g?'under':''}" style="height:${Math.max(2,h/maxW*100)}%"></div>
       <span class="wl">${m.slice(5).replace('-','/')}</span></div>`).join('')+'</div>';
   // 热力图（带月份标签与图例）
-  const beforeStart=t<START;
-  const sM0=mondayOf(START),eM=mondayOf(t);
+  const history=Object.keys(S.days).filter(ds=>ds<START&&ds<=t).sort();
+  const beforeStart=t<START&&!history.length;
+  const heatStart=history.length?history[0]:START;
+  const sM0=mondayOf(heatStart),eM=mondayOf(t);
   const sM=sM0<=eM?sM0:eM;
   const nW=clamp(Math.round(dayDiff(eM,sM)/7)+1,1,90);
   let months='',cols='',lastMon='';
@@ -277,14 +286,14 @@ function vStats(){
   const rate=weekRate(mondayOf(t));
   const bkd=S.bk?Math.floor((Date.now()-S.bk)/864e5):null;
   return `<div class="grid2">
-    <div class="stat"><div class="v" style="color:var(--ac)">${rate}%</div><div class="k">本周完成率（主指标）</div></div>
+    <div class="stat"><div class="v" style="color:var(--ac)">${rate}%</div><div class="k">本周最低线完成率</div></div>
     <div class="stat"><div class="v">🔥 ${streak()}</div><div class="k">连续打卡（天）</div></div>
     <div class="stat"><div class="v">${totalDays}</div><div class="k">累计打卡（天）</div></div>
     <div class="stat"><div class="v" style="color:#059669">${totalH.toFixed(1)} h</div><div class="k">累计学习时长</div></div>
     <div class="stat"><div class="v">🩹 ${mkLeft(t.slice(0,7))}</div><div class="k">本月补签卡剩余</div></div>
     <div class="stat"><div class="v" style="color:#d97706">${dayDiff(examDate(),t)}</div><div class="k">距初试（天）</div></div>
   </div>
-  <div class="card" style="margin-top:12px"><h3>本周任务完成率 ${rate}%（周计划制主看这个）</h3>
+  <div class="card" style="margin-top:12px"><h3>本周最低线完成率 ${rate}%</h3>
     <div class="pgwrap"><div class="pg" style="width:${rate}%"></div></div>
     <div class="phds" style="margin-top:8px">上周 ${weekRate(addD(mondayOf(t),-7))}% · 上上周 ${weekRate(addD(mondayOf(t),-14))}%</div></div>
   <div class="card"><h3>科目时间分布（按记录时长）</h3>${timeBars}</div>
@@ -294,7 +303,7 @@ function vStats(){
     ${beforeStart?`<div class="tip">开营（${START}）后开始记录，届时这里会显示每一天的完成热度。</div>`:
     `<div class="heat"><div class="months">${months}</div><div class="cols">${cols}</div></div>
     <div class="legend">少 <span class="cell"></span><span class="cell l1"></span><span class="cell l2"></span><span class="cell l3"></span> 多</div>
-    <div class="hint">横向滑动查看 · 左起 2026/9，右至今天</div>`}</div>
+    <div class="hint">横向滑动查看 · 从最早显示的记录周到今天</div>`}</div>
   <div class="card"><h3>数据健康</h3><div class="tip">
     上次备份：${bkd===null?'<b style="color:var(--amber)">从未备份</b>':(bkd===0?'今天':bkd+' 天前')}${bkd!==null&&bkd>=(S.settings.backupDays||7)?' <span class="pill warn">该备份了</span>':''}<br>
     累计记录 ${Object.keys(S.days).length} 天 · 模考 ${(S.scores||[]).length} 次 · 章节数据 ${Object.keys(S.ch||{}).length} 科</div></div>`;
@@ -320,13 +329,13 @@ function vMile(){
       <span class="chip ${dd<0?'past':''}">${chip}</span></summary><p>${esc(txt)}</p></details>`;
   }).join('')+'</div>';
   html+=`<div class="card"><h3>日历提醒（推荐）</h3>
-    <div class="tip">应用无法主动推送通知，但可以导出日历文件：包含<b>每天 19:00 打卡提醒</b>与<b>全部 14 个关键节点</b>。导入安卓日历后就会自动提醒你。</div>
+    <div class="tip">应用无法主动推送通知，但可以导出日历文件：包含<b>每天 19:00 打卡提醒</b>与<b>${MILES.length} 个关键节点</b>。导入安卓日历后请检查提醒是否生效。</div>
     <button class="bigbtn" data-act="icsdl">📅 导出日历文件（.ics）</button>
     <div class="hint">导入方法：下载后点开文件 → 选择用「日历」打开 → 保存。或在 Google 日历网页版「导入」。</div></div>`;
-  html+=`<div class="card"><h3>冲刺档三原则</h3><div class="tip">
-    ① 大四下（2027 春）每天 4-5h 是计划成立的前提；<br>
-    ② 暑假（2027.7-8）全脱产 9h，全年决胜窗口；<br>
-    ③ 三个检查点用模考成绩说话：西综套卷 ≥200 冲麻醉/外科，&lt;200 果断转全科或保底档院校。</div></div>`;
+  html+=`<div class="card"><h3>按实际进度调整</h3><div class="tip">
+    ① 平时按每天1–2小时规划，先保证英语与西综两项最低线；<br>
+    ② 每月核对章节、英语阅读和可用时间；任务未完成时调整计划，不必堆积补课；<br>
+    ③ 总时长偏紧，真题套卷可另找较长时间。结合多次练习、目标院校要求和可投入时间调整目标。</div></div>`;
   return html;
 }
 
@@ -419,6 +428,6 @@ function vSet(){
   html+=`<div class="card"><h3>同步状态</h3><div class="tip">
     ${syncOn?'🟢 已连接同源同步服务，多设备按天合并。':'⚪ 独立模式：数据完全保存在本机浏览器，不依赖任何电脑。'}<br><br>
     <b>手机安装（安卓）：</b>Chrome → ⋮ → 「添加到主屏幕」或「安装应用」，可全屏运行且断网可用。<br><br>
-    <b>数据说明：</b>离线状态：<span id="offline-status">${offlineReady?'资源已就绪，可尝试飞行模式重新打开验证':'尚未确认，请联网稍候或重新打开'}</span>。<br>本机副本仍在同一浏览器里，不是异地备份；换手机或清浏览器数据前务必导出。<br><br>版本：2026.09.13 · 可靠性更新</div></div>`;
+    <b>数据说明：</b>离线状态：<span id="offline-status">${offlineReady?'资源已就绪，可尝试飞行模式重新打开验证':'尚未确认，请联网稍候或重新打开'}</span>。<br>本机副本仍在同一浏览器里，不是异地备份；换手机或清浏览器数据前务必导出。<br><br>版本：2026.10 · 11月2日新计划</div></div>`;
   return html;
 }
