@@ -13,8 +13,8 @@ class StudyPlanTest {
         assertEquals("2026-11-02", plan.start)
         assertEquals("2026-09-14", plan.historyStart)
         assertEquals(6, plan.data.arr("PHASES").length())
-        assertEquals(listOf(12, 12, 13, 8, 9), plan.subjects.map { it.arr("ch").length() })
-        assertEquals(17, plan.milestones.size)
+        assertEquals(listOf(12, 12, 15, 9, 9, 4), plan.subjects.map { it.arr("ch").length() })
+        assertEquals(18, plan.milestones.size)
     }
 
     @Test fun historicalPhaseAndTaskIdsRemainIntact() {
@@ -28,14 +28,46 @@ class StudyPlanTest {
 
     @Test fun phaseBoundariesAndPoliticsStartRespectWebDates() {
         val state = CheckinCore.emptyState()
-        assertEquals("p0a", plan.phase("2027-01-03", state).getString("id"))
-        assertEquals("p0b", plan.phase("2027-01-04", state).getString("id"))
+        listOf(
+            "2027-01-17" to "p0a", "2027-01-18" to "p0b",
+            "2027-02-28" to "p0b", "2027-03-01" to "p1",
+            "2027-04-18" to "p1", "2027-04-19" to "p2",
+            "2027-07-25" to "p2", "2027-07-26" to "p3",
+            "2027-10-10" to "p3", "2027-10-11" to "p3b",
+            "2027-11-30" to "p3b",
+        ).forEach { (date, phase) -> assertEquals(date, phase, plan.phase(date, state).getString("id")) }
         assertFalse(plan.tasks("2027-06-30", state, "2027-07-01").any { it.id == "zzqh" })
         assertTrue(plan.tasks("2027-07-01", state, "2027-07-01").any { it.id == "zzqh" })
         assertEquals("p4", plan.phase("2027-12-01", state).getString("id"))
         assertEquals("p5", plan.phase("2027-12-25", state).getString("id"))
         state.obj("settings").put("exam", "2027-06-01")
         assertEquals("p5", plan.phase("2027-06-01", state).getString("id"))
+    }
+
+    @Test fun phaseDailyGoalsAndTasksFollowWebPlan() {
+        val state = CheckinCore.emptyState()
+        listOf(
+            "2027-01-17" to 1.5, "2027-01-18" to 3.5,
+            "2027-02-28" to 3.5, "2027-03-01" to 1.5,
+            "2027-11-30" to 1.5, "2027-12-01" to 1.5,
+        ).forEach { (date, expected) -> assertEquals(date, expected, plan.goalHours(date, state, date), 0.0) }
+        assertEquals(0.0, plan.goalHours("2026-10-01", state, "2026-11-09"), 0.0)
+        state.obj("days").put("2026-10-01", StudyPlan.day())
+        assertEquals(2.5, plan.goalHours("2026-10-01", state, "2026-11-09"), 0.0)
+        assertTrue(plan.tasks("2027-01-18", state, "2027-01-18").any { it.id == "phyr" })
+        assertTrue(plan.tasks("2027-03-01", state, "2027-03-01").any { it.id == "basr" })
+        assertTrue(plan.tasks("2027-10-11", state, "2027-10-11").any { it.id == "hum" })
+        assertTrue(plan.tasks("2027-01-17", state, "2027-01-17").first().label.contains("新词约40个"))
+        assertTrue(plan.tasks("2027-03-01", state, "2027-03-01").first().label.contains("全书二轮"))
+    }
+
+    @Test fun weeklyTargetsSumDailyPhaseGoalsAndExcludeFutureDays() {
+        val state = CheckinCore.emptyState()
+        assertEquals(10.5, weekStats(plan, state, "2027-01-17", "2027-01-11").target, 0.0)
+        assertEquals(10.5, weekStats(plan, state, "2027-01-20", "2027-01-18").target, 0.0)
+        assertEquals(24.5, weekStats(plan, state, "2027-01-24", "2027-01-18").target, 0.0)
+        assertEquals(18.5, weekStats(plan, state, "2027-01-21", "2027-01-15").target, 0.0)
+        assertEquals(10.5, weekStats(plan, state, "2027-03-07", "2027-03-01").target, 0.0)
     }
 
     @Test fun minimumLineNeedsWordsAndDrillNotJustHours() {

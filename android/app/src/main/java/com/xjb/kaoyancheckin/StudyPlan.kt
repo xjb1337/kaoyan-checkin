@@ -24,6 +24,16 @@ class StudyPlan(val data: JSONObject) {
         return data.arr("PHASES").getJSONObject(0)
     }
 
+    // Web ch is keyed by subject and zero-based chapter index, not by chapter name.
+    fun chapterDone(subject: JSONObject, state: JSONObject): Int {
+        val flags = state.obj("ch").arr(subject.getString("k"))
+        return (0 until subject.arr("ch").length()).count { flags.optBoolean(it) }
+    }
+
+    fun goalHours(date: String, state: JSONObject, today: String): Double =
+        if (date < start && (date >= today || state.obj("days").optJSONObject(date) == null)) 0.0
+        else phase(date, state).optDouble("gh", 1.5).let { if (it == 0.0) 1.5 else it }
+
     fun tasks(date: String, state: JSONObject, today: String): List<StudyTask> {
         val record = state.obj("days").optJSONObject(date)
         val beforePlan = date < start && (date >= today || record == null)
