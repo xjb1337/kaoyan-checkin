@@ -28,7 +28,10 @@ test('计划从11月2日开始，阶段衔接完整，初试日期设置仍然�
  assert.equal(a.run("PHASES.every((p,i)=>i===0||p.s===addD(PHASES[i-1].e,1))"),true);
  assert.equal(a.run("PHASES[0].s===START && PHASES.at(-1).e==='2027-11-30'"),true);
  assert.equal(a.run("phaseOf('2027-12-01').id"),'p4');
- assert.equal(a.run("PHASES.every(p=>p.gh===1.5) && PH4.gh===1.5"),true);
+ assert.equal(a.run("phaseOf('2027-02-01').gh"),3.5);
+ assert.equal(a.run("PHASES.filter(p=>p.id!=='p0b').every(p=>p.gh===1.5) && PH4.gh===1.5"),true);
+ assert.equal(a.run("SUBJ.every((su,i)=>i===0||su.s>SUBJ[i-1].s)"),true);
+ assert.equal(a.run("SUBJ.find(x=>x.k==='hum').ch.length"),4);
 });
 test('旧记录保留原任务、勾选和存储内容，新计划不会标记已学词为打卡',()=>{
  const original=seed();original.days['2026-10-20']={t:{words:true,drill:true},c:[],h:1,sh:{英语:1},rw:{g:'旧记录'},u:2};
@@ -55,7 +58,7 @@ test('开始前没有欠打卡，开始后的首页展示新计划和1.5小时�
  assert.equal(before.run("weekStats('2026-10-26').tgt"),0);
  const after=boot(undefined,false,'2026-11-02T12:00:00');
  const page=after.run('vToday()');
- assert.match(page,/分批复习已学词/);
+ assert.match(page,/复习已学词/);
  assert.match(page,/其余是阶段参考/);
  assert.match(page,/日目标 1\.5h/);
 });
