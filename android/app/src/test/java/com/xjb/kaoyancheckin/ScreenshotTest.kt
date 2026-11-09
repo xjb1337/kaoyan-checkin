@@ -2,8 +2,12 @@ package com.xjb.kaoyancheckin
 
 import android.app.Application
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.lifecycle.ViewModelProvider
 import androidx.room.Room
 import androidx.test.core.app.ActivityScenario
@@ -14,6 +18,7 @@ import java.time.Clock
 import java.time.Instant
 import java.util.TimeZone
 import kotlinx.coroutines.runBlocking
+import org.json.JSONArray
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -96,16 +101,55 @@ class ScreenshotTest {
             }
             compose.onNodeWithText("从网页导出 JSON 导入").assertDoesNotExist()
 
+            fun capture(name: String) {
+                val suffix = if (dark) "-dark" else ""
+                scenario.onActivity { it.window.decorView.captureRoboImage(File(outputDir, "app-$name$suffix.png")) }
+            }
+
             tabs.forEachIndexed { index, (label, name) ->
                 compose.onNodeWithText(label).performClick()
                 compose.waitForIdle()
-                val suffix = if (dark) "-dark" else ""
-                val output = File(outputDir, "app-$name$suffix.png")
                 scenario.onActivity {
                     check(model.page == index) { "Tab $label did not open" }
-                    it.window.decorView.captureRoboImage(output)
                 }
+                capture(name)
             }
+
+            compose.onNodeWithText("进度").performClick()
+            compose.onNodeWithText("0/15").assertIsDisplayed()
+            compose.onAllNodesWithText("0/9").assertCountEquals(2)
+            compose.onNodeWithText("0/4").assertIsDisplayed()
+            compose.onNodeWithText("章节进度").performScrollTo()
+            capture("prog-chapters")
+            compose.onAllNodesWithText("病理")[1].performScrollTo().performClick()
+            compose.onNodeWithText("淋巴造血系统疾病").performScrollTo().assertIsDisplayed()
+            capture("prog-path")
+            compose.onAllNodesWithText("内科")[1].performScrollTo().performClick()
+            compose.onNodeWithText("诊断学（常见症状与体格检查）").performScrollTo().assertIsDisplayed()
+            capture("prog-med")
+            compose.onAllNodesWithText("人文")[1].performScrollTo().performClick()
+            compose.onNodeWithText("卫生法律法规").performScrollTo().assertIsDisplayed()
+            capture("prog-humanities")
+
+            CheckinCore.clock = Clock.fixed(Instant.parse("2027-01-20T13:30:00Z"), CheckinCore.shanghai)
+            compose.runOnIdle { model.resume() }
+            compose.onNodeWithText("今日").performClick()
+            compose.onNodeWithText("小时 / 日目标 3.5h").performScrollTo().assertIsDisplayed()
+            capture("winter-today")
+            compose.onNodeWithText("周目标").performClick()
+            compose.onNodeWithText("打卡达标 0/3 天 · 时长 0.0h / 目标 10.5h").assertIsDisplayed()
+            capture("winter-week")
+            // Set up a separate presentation fixture without depending on Room's async writer.
+            compose.runOnIdle {
+                model.state.obj("ch").put("hum", JSONArray().put(true))
+                model.page = 3
+            }
+            compose.onNodeWithText("周目标").performClick()
+            compose.onNodeWithText("章节：人文 1/4章", substring = true).performScrollTo().assertIsDisplayed()
+            capture("winter-week-humanities")
+            compose.onNodeWithText("统计").performClick()
+            compose.onNodeWithText("近 8 周学习时长（橙=未达目标）").performScrollTo().assertIsDisplayed()
+            capture("winter-stats")
         }
     }
 }

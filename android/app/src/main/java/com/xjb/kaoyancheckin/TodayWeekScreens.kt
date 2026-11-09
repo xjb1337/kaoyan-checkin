@@ -21,14 +21,10 @@ import com.xjb.kaoyancheckin.ui.theme.webColors
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
-private fun goalHours(model: CheckinViewModel, date: String): Double =
-    if (date < model.plan.start && (date >= model.today || model.state.obj("days").optJSONObject(date) == null)) 0.0
-    else model.plan.phase(date, model.state).optDouble("gh", 1.5).let { if (it == 0.0) 1.5 else it }
-
 internal data class WeekStats(val rate: Int, val days: Int, val elapsed: Int, val hours: Double, val target: Double)
 
 // Presentation-only equivalents of the web's weekRate/weekStats, using existing plan and records.
-internal fun weekStats(model: CheckinViewModel, week: String): WeekStats {
+internal fun weekStats(plan: StudyPlan, state: JSONObject, today: String, week: String): WeekStats {
     var completed = 0
     var total = 0
     var met = 0
@@ -37,19 +33,19 @@ internal fun weekStats(model: CheckinViewModel, week: String): WeekStats {
     var target = 0.0
     for (i in 0..6) {
         val date = StudyPlan.addDays(week, i.toLong())
-        if (date > model.today) break
-        val record = model.state.obj("days").optJSONObject(date)
-        val all = model.plan.tasks(date, model.state, model.today)
-        val phase = model.plan.phase(date, model.state)
+        if (date > today) break
+        val record = state.obj("days").optJSONObject(date)
+        val all = plan.tasks(date, state, today)
+        val phase = plan.phase(date, state)
         val minimumIds = phase.arr("tasks").values().filterIsInstance<JSONObject>().filter { it.optInt("min") == 1 }.map { it.optString("id") }.toSet()
         val tasks = if (phase.optInt("fs") == 1) all else all.filter { it.id in minimumIds }
         total += tasks.size
-        completed += tasks.count { model.plan.isDone(record, it.id) }
-        if (date < model.plan.start && record == null) continue
+        completed += tasks.count { plan.isDone(record, it.id) }
+        if (date < plan.start && record == null) continue
         elapsed++
-        if (model.plan.satisfied(date, model.state)) met++
+        if (plan.satisfied(date, state)) met++
         hours += record?.optDouble("h", 0.0) ?: 0.0
-        target += goalHours(model, date)
+        target += plan.goalHours(date, state, today)
     }
     return WeekStats(if (total == 0) 0 else (completed * 100.0 / total).roundToInt(), met, elapsed, hours, target)
 }
@@ -102,7 +98,7 @@ internal fun TodayScreen(model: CheckinViewModel) {
     Section("学习时长 · 按科目记录") {
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
             Text(hours(record.optDouble("h", 0.0)), fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold, color = webColors.text)
-            Text("小时 / 日目标 ${hours(goalHours(model, date))}h", Modifier.padding(bottom = 4.dp), fontSize = 13.sp, color = webColors.sub)
+            Text("小时 / 日目标 ${hours(model.plan.goalHours(date, state, model.today))}h", Modifier.padding(bottom = 4.dp), fontSize = 13.sp, color = webColors.sub)
         }
         Spacer(Modifier.height(12.dp))
         (listOf("西综", "英语", "政治", "其他") + record.obj("sh").namesList()).distinct().forEach { subject ->
@@ -151,7 +147,9 @@ internal fun TodayScreen(model: CheckinViewModel) {
             Spacer(Modifier.height(10.dp))
             ProgressBar(percent / 100f)
             Spacer(Modifier.height(8.dp))
-            Tip("每天 1–2 小时覆盖全部科目可能偏紧，请结合进度与可投入时间调整。本机保存不等于云备份，换手机前请导出 JSON。")
+            Tip("单词已背约1300个：每天复习 + 新词约40个，寒假结束前过完第一轮，3月起转为复习和真题生词。平时可参考英语25–30分钟、西综50–60分钟；寒假每天3–4小时，以西综为主。")
+            Tip("平时每天1–2小时偏紧，周末尽量多学1小时；寒假是全年最长的整块时间，生化放在寒假完成。每月底对照章节进度调整，落后时先压缩新内容、保住复习。")
+            Tip("本机保存不等于云备份。换手机前请导出 JSON，并保存到网盘或发给自己。")
         }
     }
 }
@@ -171,7 +169,7 @@ internal fun WeekScreen(model: CheckinViewModel) {
     val week = model.week
     val record = model.state.obj("weeks").optJSONObject(week) ?: StudyPlan.week()
     val enabled = week <= StudyPlan.monday(model.today) && model.loadError.isEmpty()
-    val stats = weekStats(model, week)
+    val stats = weekStats(model.plan, model.state, model.today, week)
     DateNav(week, { model.week = StudyPlan.addDays(week, -7) }, { model.week = StudyPlan.addDays(week, 7) },
         { model.week = StudyPlan.monday(model.today) }, "本周", week == StudyPlan.monday(model.today), false)
     if (!enabled) Banner("未来周目标仅供预览", "info")
@@ -224,8 +222,7 @@ internal fun WeekScreen(model: CheckinViewModel) {
     Section("自动周报") {
         val completed = (0..2).count { record.arr("md").optBoolean(it) }
         val chapters = model.plan.subjects.mapNotNull { subject ->
-            val flags = model.state.obj("ch").arr(subject.getString("k"))
-            val count = (0 until subject.arr("ch").length()).count { flags.optBoolean(it) }
+            val count = model.plan.chapterDone(subject, model.state)
             if (count == 0) null else "${subject.getString("name")} $count/${subject.arr("ch").length()}章"
         }
         val goalStatus = if (stats.hours >= stats.target) "达标" else "欠 ${hours(stats.target - stats.hours)}h"

@@ -38,8 +38,7 @@ internal fun ProgressScreen(model: CheckinViewModel) {
             val start = subject.getString("s")
             val end = subject.getString("e")
             val total = subject.arr("ch").length()
-            val flags = model.state.obj("ch").arr(subject.getString("k"))
-            val done = (0 until total).count { flags.optBoolean(it) }
+            val done = model.plan.chapterDone(subject, model.state)
             anyChapter = anyChapter || done > 0
             val expected = when {
                 model.today < start -> 0
@@ -67,7 +66,7 @@ internal fun ProgressScreen(model: CheckinViewModel) {
             val subjectKey = subject.getString("k")
             val chapters = subject.arr("ch")
             val flags = model.state.obj("ch").arr(subjectKey)
-            val done = (0 until chapters.length()).count { flags.optBoolean(it) }
+            val done = model.plan.chapterDone(subject, model.state)
             var expanded by rememberSaveable(subjectKey) { mutableStateOf(false) }
             Row(Modifier.fillMaxWidth().heightIn(min = 58.dp).clickable { expanded = !expanded }.padding(horizontal = 2.dp, vertical = 11.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -162,7 +161,7 @@ internal fun StatsScreen(model: CheckinViewModel) {
     val dates = state.obj("days").namesList().filter { it <= model.today }
     val totalHours = dates.sumOf { state.obj("days").obj(it).optDouble("h", 0.0) }
     val currentWeek = StudyPlan.monday(model.today)
-    val rate = weekStats(model, currentWeek).rate
+    val rate = weekStats(model.plan, state, model.today, currentWeek).rate
     val cards = listOf(
         Triple("$rate%", "本周最低线完成率", c.accent),
         Triple("🔥 ${model.plan.streak(state, model.today)}", "连续打卡（天）", c.text),
@@ -188,7 +187,7 @@ internal fun StatsScreen(model: CheckinViewModel) {
     Section("本周最低线完成率 $rate%") {
         ProgressBar(rate / 100f)
         Spacer(Modifier.height(8.dp))
-        Tip("上周 ${weekStats(model, StudyPlan.addDays(currentWeek, -7)).rate}% · 上上周 ${weekStats(model, StudyPlan.addDays(currentWeek, -14)).rate}%")
+        Tip("上周 ${weekStats(model.plan, state, model.today, StudyPlan.addDays(currentWeek, -7)).rate}% · 上上周 ${weekStats(model.plan, state, model.today, StudyPlan.addDays(currentWeek, -14)).rate}%")
     }
     Section("科目时间分布（按记录时长）") {
         val totals = linkedMapOf<String, Double>()
@@ -204,7 +203,7 @@ internal fun StatsScreen(model: CheckinViewModel) {
     Section("近 8 周学习时长（橙=未达目标）") {
         val weeks = (7 downTo 0).map { offset ->
             val monday = StudyPlan.addDays(currentWeek, -7L * offset)
-            monday to weekStats(model, monday)
+            monday to weekStats(model.plan, state, model.today, monday)
         }
         val max = weeks.maxOf { maxOf(it.second.hours, it.second.target) }.coerceAtLeast(1.0)
         Row(Modifier.fillMaxWidth().height(78.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.Bottom) {
@@ -303,7 +302,7 @@ internal fun MilestonesScreen(model: CheckinViewModel) {
         }
     }
     Section("按实际进度调整") {
-        Tip("① 平时按每天1–2小时规划，先保证英语与西综两项最低线；\n② 每月核对章节、英语阅读和可用时间；任务未完成时调整计划，不必堆积补课；\n③ 总时长偏紧，真题套卷可另找较长时间。结合多次练习、目标院校要求和可投入时间调整目标。")
+        Tip("① 平时按每天1.5小时规划，寒假3–4小时，先保证英语与西综两项最低线；\n② 每月核对章节、英语阅读和可用时间；任务未完成时调整计划，不必堆积补课；\n③ 内科、外科分值最高（约56%），一轮后在10–11月安排二轮；7月实习后每天1–2小时以保底为主，真题套卷放周末。结合多次练习、目标院校要求和可投入时间调整目标。")
     }
     // Preserve the existing Android phase route, after the web's milestone sections.
     Section("阶段路线") {
