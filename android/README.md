@@ -29,6 +29,21 @@ sdk.dir=/你的/Android/Sdk
 
 技术版本固定为 AGP 8.7.3、Kotlin 1.9.24、KSP 1.9.24-1.0.20、Compose BOM 2024.09.03、Compose Compiler 1.5.14、Room 2.6.1。没有通知、相机、更新服务、网页套壳或网络权限。
 
+### JVM 界面截图
+
+截图测试使用 Robolectric 的 API 34 原生图形模式与 Roborazzi，不需要模拟器。它会将 `app/src/test/resources/screenshot-seed.json` 按完整恢复流程写入测试数据库，再启动真实 Activity，录制六个页面的浅色和深色图。测试时将日期固定为上海时间 2026-11-09；应用实际运行时仍使用系统日期。
+
+在上面配置好 JDK、SDK 和网络之后，在 `android/` 目录运行：
+
+```bash
+./gradlew :app:testDebugUnitTest --tests com.xjb.kaoyancheckin.ScreenshotTest \
+  -PrecordScreenshots=true --no-daemon --max-workers=2
+```
+
+若 Gradle 或 Robolectric 需要显式使用本机代理，在命令末尾加上 `-Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=7891 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7891`。依赖和 Robolectric 的 API 34 文件均已缓存时可加 `--offline`。
+
+图片默认写入 `app/build/screenshots/`，再次录制会覆盖同名文件；可用 `-PscreenshotDir=/绝对路径` 或 `-DscreenshotDir=/绝对路径` 指定其他目录以保留基线。普通 `testDebugUnitTest` 不运行截图类，也不校验基线。
+
 ## 从网页迁移
 
 1. 在原来使用的网页浏览器打开「设置 → 备份与恢复 → 导出备份（下载 JSON）」，确认文件保存成功。网页存储键是 `kaoyan2028_v1`，但导入的是导出的 JSON 对象，不是包含该键的 localStorage 外层对象。

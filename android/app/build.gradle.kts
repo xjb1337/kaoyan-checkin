@@ -22,6 +22,26 @@ android {
     buildFeatures { compose = true }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+    testOptions { unitTests.isIncludeAndroidResources = true }
+}
+
+val recordScreenshots = providers.gradleProperty("recordScreenshots").map(String::toBoolean).orElse(false)
+val screenshotDir = providers.gradleProperty("screenshotDir")
+    .orElse(providers.systemProperty("screenshotDir"))
+    .orElse(layout.buildDirectory.dir("screenshots").map { it.asFile.absolutePath })
+
+tasks.withType<Test>().configureEach {
+    if (recordScreenshots.get()) {
+        systemProperty("roborazzi.test.record", "true")
+        systemProperty("screenshotDir", screenshotDir.get())
+        // Robolectric may need to download its instrumented SDK in the test JVM.
+        listOf("http.proxyHost", "http.proxyPort", "https.proxyHost", "https.proxyPort").forEach { name ->
+            providers.systemProperty(name).orNull?.let { systemProperty(name, it) }
+        }
+        outputs.upToDateWhen { false }
+    } else {
+        exclude("**/ScreenshotTest.class")
+    }
 }
 
 dependencies {
@@ -40,5 +60,10 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+    testImplementation(platform("androidx.compose:compose-bom:2024.09.03"))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("androidx.test:core:1.6.1")
+    testImplementation("org.robolectric:robolectric:4.13")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.38.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

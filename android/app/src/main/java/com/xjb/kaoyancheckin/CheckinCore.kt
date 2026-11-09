@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.Clock
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.math.floor
@@ -17,6 +18,8 @@ fun JSONObject.copyJson(): JSONObject = JSONObject(toString())
 object CheckinCore {
     const val MAX_TEXT = 5 * 1024 * 1024
     val shanghai: ZoneId = ZoneId.of("Asia/Shanghai")
+    // Tests can fix the date; the application normally uses Shanghai system time.
+    internal var clock: Clock = Clock.system(shanghai)
     private val dangerous = setOf("__proto__", "constructor", "prototype")
 
     private fun fail(message: String): Nothing = throw IllegalArgumentException(message)
@@ -31,7 +34,7 @@ object CheckinCore {
     private fun fallback(value: Any?, default: Any): Any = if (truthy(value)) value!! else default
     private fun round(value: Double) = floor(value * 100 + 0.5) / 100
 
-    fun today(): String = LocalDate.now(shanghai).toString()
+    fun today(): String = LocalDate.now(clock).toString()
     fun validDate(value: Any?): Boolean {
         if (value !is String || !Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}").matches(value)) return false
         return runCatching { LocalDate.parse(value).toString() == value }.getOrDefault(false)
