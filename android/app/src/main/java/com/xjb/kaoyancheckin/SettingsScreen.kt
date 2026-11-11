@@ -6,7 +6,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -19,6 +24,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.SpanStyle
@@ -26,6 +32,9 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.xjb.kaoyancheckin.ui.theme.AppTheme
+import com.xjb.kaoyancheckin.ui.theme.WebColors
+import com.xjb.kaoyancheckin.ui.theme.paletteFor
 import com.xjb.kaoyancheckin.ui.theme.webColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -34,7 +43,7 @@ import java.time.LocalDate
 
 // Web vSet: exam, recurring tasks, makeup cards, backup/recovery and danger controls.
 @Composable
-internal fun SettingsScreen(model: CheckinViewModel, updates: UpdateViewModel) {
+internal fun SettingsScreen(model: CheckinViewModel, updates: UpdateViewModel, appearance: ThemeViewModel) {
     val context = LocalContext.current
     val focus = LocalFocusManager.current
     val scope = rememberCoroutineScope()
@@ -70,6 +79,18 @@ internal fun SettingsScreen(model: CheckinViewModel, updates: UpdateViewModel) {
                     result.toString()
                 }
             } }.onSuccess(model::stage).onFailure { model.notify("无法读取：${it.message}") }
+        }
+    }
+    Section("外观主题") {
+        Tip("选择后立即生效并保存在本机，浅色与深色跟随系统。")
+        Spacer(Modifier.height(10.dp))
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            AppTheme.entries.forEach { theme ->
+                ThemePreviewCard(theme, appearance.theme == theme) { appearance.select(theme) }
+            }
         }
     }
     Section("初试日期") {
@@ -193,5 +214,39 @@ internal fun SettingsScreen(model: CheckinViewModel, updates: UpdateViewModel) {
             "过去的记录会保留。",
             { retireTarget = null },
         ) { model.retireTask(name) }
+    }
+}
+
+/** A pair of miniature pages makes the light and dark variants visible before selecting. */
+@Composable
+private fun ThemePreviewCard(theme: AppTheme, selected: Boolean, onClick: () -> Unit) {
+    val c = webColors
+    val shape = RoundedCornerShape(14.dp)
+    Column(
+        Modifier.width(126.dp).clip(shape)
+            .background(c.card)
+            .border(if (selected) 2.dp else 1.dp, if (selected) c.accent else c.line, shape)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .padding(9.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            MiniThemePreview(paletteFor(theme, false), Modifier.weight(1f))
+            MiniThemePreview(paletteFor(theme, true), Modifier.weight(1f))
+        }
+        Text(theme.label, color = c.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(if (selected) "正在使用" else "浅色 / 深色", color = if (selected) c.accent else c.sub, fontSize = 11.sp, maxLines = 1)
+    }
+}
+
+@Composable
+private fun MiniThemePreview(palette: WebColors, modifier: Modifier = Modifier) {
+    Column(modifier.height(54.dp).clip(RoundedCornerShape(8.dp)).background(palette.bg)) {
+        Box(Modifier.fillMaxWidth().height(13.dp).background(palette.blue))
+        Column(Modifier.padding(horizontal = 5.dp, vertical = 5.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Box(Modifier.fillMaxWidth(.8f).height(3.dp).background(palette.text, CircleShape))
+            Box(Modifier.fillMaxWidth(.55f).height(3.dp).background(palette.sub, CircleShape))
+            Box(Modifier.width(20.dp).height(6.dp).background(palette.accent, CircleShape))
+        }
     }
 }

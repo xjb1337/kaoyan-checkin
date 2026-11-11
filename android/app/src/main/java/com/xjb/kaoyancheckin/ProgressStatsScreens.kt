@@ -296,7 +296,7 @@ internal fun StatsScreen(model: CheckinViewModel) {
         val max = shown.maxOfOrNull { it.value }?.coerceAtLeast(1.0) ?: 1.0
         if (shown.isEmpty()) Tip("还没有科目时长记录（在今日页点「+0.5 西综」等按钮）")
         shown.forEach { (subject, total) ->
-            val color = when (subject) { "西综" -> c.blue; "英语" -> c.greenStrong; "政治" -> c.orange; else -> c.purple }
+            val color = when (subject) { "西综" -> c.subjectBlue; "英语" -> c.greenStrong; "政治" -> c.orange; else -> c.purple }
             BarRow(subject, "${hours(total)}h", (total / max).toFloat(), color)
         }
     }
@@ -311,7 +311,7 @@ internal fun StatsScreen(model: CheckinViewModel) {
                 Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.Bottom, horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(Modifier.fillMaxWidth(.7f).widthIn(max = 26.dp).height(((stats.hours / max * 57).toFloat()).coerceAtLeast(2f).dp)
                         .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp)).background(Brush.verticalGradient(
-                            if (stats.hours < stats.target) listOf(Color(0xFFF59E0B), Color(0xFFFBBF24)) else listOf(c.blue, Color(0xFF60A5FA)))))
+                            if (stats.hours < stats.target) listOf(Color(0xFFF59E0B), Color(0xFFFBBF24)) else listOf(c.blue, c.progressHighlight))))
                     Text(shortDate(monday), fontSize = 9.sp, lineHeight = 14.sp, color = c.sub, maxLines = 1)
                 }
             }

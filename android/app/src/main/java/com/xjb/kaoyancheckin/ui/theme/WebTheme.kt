@@ -13,25 +13,29 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-/** Tokens taken from index.html :root and both prefers-color-scheme overrides. */
+/** Page and brand tokens. Status and subject colors remain the same across skins. */
 data class WebColors(
     val bg: Color, val card: Color, val text: Color, val sub: Color, val line: Color,
     val accent: Color, val red: Color, val amber: Color, val green: Color,
     val blueTag: Color, val greenTag: Color, val orangeTag: Color, val redTag: Color, val purpleTag: Color,
     val dark: Boolean,
+    // Opaque brand color for controls with white text, including in dark mode.
+    val blue: Color = Color(0xFF2563EB),
 ) {
-    // The web keeps these translucent backgrounds and the gradient fixed in both themes.
-    val blue = Color(0xFF2563EB)
+    val subjectBlue = Color(0xFF2563EB)
+    val progressHighlight = if (blue == subjectBlue) Color(0xFF60A5FA) else accent
     val greenStrong = Color(0xFF059669)
     val purple = Color(0xFF7C3AED)
     val orange = Color(0xFFD97706)
     val chipBlue = blue.copy(alpha = .12f)
+    val chipSubjectBlue = subjectBlue.copy(alpha = .12f)
     val chipGreen = greenStrong.copy(alpha = .12f)
     val chipOrange = orange.copy(alpha = .14f)
     val chipRed = Color(0xFFDC2626).copy(alpha = .12f)
     val chipPurple = purple.copy(alpha = .12f)
 }
 
+// These are the existing website palette, unchanged for installations without a preference.
 private val LightWebColors = WebColors(
     Color(0xFFF2F4F7), Color.White, Color(0xFF1F2937), Color(0xFF6B7280), Color(0xFFEEF0F3),
     Color(0xFF2563EB), Color(0xFFEF4444), Color(0xFFD97706), Color(0xFF16A34A),
@@ -42,13 +46,50 @@ private val DarkWebColors = WebColors(
     Color(0xFF93C5FD), Color(0xFFFCA5A5), Color(0xFFFCD34D), Color(0xFF86EFAC),
     Color(0xFF93C5FD), Color(0xFF6EE7B7), Color(0xFFFCD34D), Color(0xFFFCA5A5), Color(0xFFC4B5FD), true,
 )
+
+/** Both Compose and the RemoteViews widget use this same palette selection. */
+internal fun paletteFor(theme: AppTheme, dark: Boolean): WebColors {
+    val base = if (dark) DarkWebColors else LightWebColors
+    return when (theme) {
+        AppTheme.WEB_BLUE -> base
+        AppTheme.INK_TEAL -> if (dark) base.copy(
+            bg = Color(0xFF0D1A1C), card = Color(0xFF17292B), text = Color(0xFFE3F0EF),
+            sub = Color(0xFFB2CAC9), line = Color(0xFF2B4446), accent = Color(0xFF8CD4D1), blue = Color(0xFF126C76),
+        ) else base.copy(
+            bg = Color(0xFFF0F6F5), card = Color.White, text = Color(0xFF193739),
+            sub = Color(0xFF536F70), line = Color(0xFFE0ECEA), accent = Color(0xFF126C76), blue = Color(0xFF126C76),
+        )
+        AppTheme.WARM_APRICOT -> if (dark) base.copy(
+            bg = Color(0xFF211710), card = Color(0xFF33241C), text = Color(0xFFF8EAE0),
+            sub = Color(0xFFD6BDAE), line = Color(0xFF513A2C), accent = Color(0xFFF4C19E), blue = Color(0xFF9E491A),
+        ) else base.copy(
+            bg = Color(0xFFFAF4EE), card = Color(0xFFFFFCF9), text = Color(0xFF38291F),
+            sub = Color(0xFF765D50), line = Color(0xFFF0E4D9), accent = Color(0xFF9E491A), blue = Color(0xFF9E491A),
+        )
+        AppTheme.NIGHT_VIOLET -> if (dark) base.copy(
+            bg = Color(0xFF171421), card = Color(0xFF282238), text = Color(0xFFF0EAF8),
+            sub = Color(0xFFC6BDD5), line = Color(0xFF443B56), accent = Color(0xFFD0BAF7), blue = Color(0xFF65429C),
+        ) else base.copy(
+            bg = Color(0xFFF5F3F9), card = Color.White, text = Color(0xFF302A3C),
+            sub = Color(0xFF6F657D), line = Color(0xFFEAE5F0), accent = Color(0xFF65429C), blue = Color(0xFF65429C),
+        )
+        AppTheme.BAMBOO_GREEN -> if (dark) base.copy(
+            bg = Color(0xFF111C15), card = Color(0xFF1D2D22), text = Color(0xFFE7F1E8),
+            sub = Color(0xFFB7CEBB), line = Color(0xFF354B3A), accent = Color(0xFFA8D9B0), blue = Color(0xFF326B45),
+        ) else base.copy(
+            bg = Color(0xFFF1F6F0), card = Color.White, text = Color(0xFF26392B),
+            sub = Color(0xFF5C7060), line = Color(0xFFE2ECE2), accent = Color(0xFF326B45), blue = Color(0xFF326B45),
+        )
+    }
+}
+
 private val LocalWebColors = staticCompositionLocalOf { LightWebColors }
 val webColors: WebColors @Composable get() = LocalWebColors.current
 
 @Composable
-fun WebTheme(content: @Composable () -> Unit) {
-    val c = if (isSystemInDarkTheme()) DarkWebColors else LightWebColors
-    // Explicit schemes prevent Material You from overriding the web palette.
+fun WebTheme(theme: AppTheme = AppTheme.DEFAULT, darkTheme: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
+    val c = paletteFor(theme, darkTheme)
+    // Explicit schemes prevent Material You from overriding the selected palette.
     val scheme = (if (c.dark) darkColorScheme() else lightColorScheme()).copy(
         primary = c.accent, onPrimary = if (c.dark) c.bg else Color.White,
         primaryContainer = c.chipBlue, onPrimaryContainer = c.accent, inversePrimary = c.accent,

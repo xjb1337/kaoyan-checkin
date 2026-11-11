@@ -42,7 +42,14 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.auto(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT),
         )
         if (CheckinWidget.isOpenToday(intent)) openTodaySignal++
-        setContent { WebTheme { CheckinApp(openTodaySignal) } }
+        val themeFactory = ThemeViewModel.factory(application)
+        setContent {
+            // Keep all ViewModels outside the theme provider so changing colors preserves drafts and navigation.
+            val model: CheckinViewModel = viewModel()
+            val updates: UpdateViewModel = viewModel()
+            val appearance: ThemeViewModel = viewModel(factory = themeFactory)
+            WebTheme(theme = appearance.theme) { CheckinApp(openTodaySignal, model, updates, appearance) }
+        }
     }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -52,7 +59,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel = viewModel(), updates: UpdateViewModel = viewModel()) {
+private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: UpdateViewModel, appearance: ThemeViewModel) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle, model) {
@@ -98,7 +105,7 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel = viewModel
                         2 -> WeekScreen(model)
                         3 -> StatsScreen(model)
                         4 -> MilestonesScreen(model)
-                        else -> SettingsScreen(model, updates)
+                        else -> SettingsScreen(model, updates, appearance)
                     }
                 }
             }
