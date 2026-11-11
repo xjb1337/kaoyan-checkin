@@ -12,6 +12,27 @@ import org.junit.Test
 class DraftSaverTest {
     private val field = DraftField.DayReview("2026-11-10", "g")
 
+    @Test fun wordDraftsDebounceIndependentlyAndFlushOnNavigation() = runTest {
+        val newWords = DraftField.Words("2026-11-10", "n")
+        val review = DraftField.Words("2026-11-10", "r")
+        val writes = mutableListOf<Pair<DraftField, String>>()
+        val saver = DraftSaver(this, save = { key, value -> writes.add(key to value); true })
+        saver.update(newWords, "4")
+        advanceTimeBy(400)
+        saver.update(newWords, "40")
+        saver.update(review, "90")
+        advanceTimeBy(599)
+        runCurrent()
+        assertTrue(writes.isEmpty())
+        advanceTimeBy(1)
+        runCurrent()
+        assertEquals(setOf(newWords to "40", review to "90"), writes.toSet())
+        saver.update(newWords, "42")
+        saver.flushAll()
+        runCurrent()
+        assertEquals(newWords to "42", writes.last())
+    }
+
     @Test fun typingDebouncesAndFlushBypassesTheDelay() = runTest {
         val writes = mutableListOf<String>()
         val saver = DraftSaver(this, save = { _, value -> writes.add(value); true })

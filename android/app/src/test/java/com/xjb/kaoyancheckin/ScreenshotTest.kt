@@ -7,6 +7,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.lifecycle.ViewModelProvider
@@ -120,12 +121,24 @@ class ScreenshotTest {
                 capture(name)
             }
 
+            compose.onNodeWithText("今日").performClick()
+            compose.onNodeWithContentDescription("新词 数量").performScrollTo().assertIsDisplayed()
+            capture("today-words")
+            compose.runOnIdle { model.toggleTask(model.today, "words") }
+            compose.waitUntil(timeoutMillis = 15_000) {
+                compose.onAllNodesWithText("撤销").fetchSemanticsNodes().isNotEmpty()
+            }
+            capture("today-undo")
+            compose.onNodeWithText("撤销").performClick()
+
             compose.onNodeWithText("进度").performClick()
-            compose.onNodeWithText("0/15").assertIsDisplayed()
+            compose.onNodeWithText("0/15").performScrollTo().assertIsDisplayed()
             compose.onAllNodesWithText("0/9").assertCountEquals(2)
-            compose.onNodeWithText("0/4").assertIsDisplayed()
+            compose.onNodeWithText("0/4").performScrollTo().assertIsDisplayed()
             compose.onNodeWithText("章节进度").performScrollTo()
             capture("prog-chapters")
+            compose.onNodeWithText("按当前速度，预计", substring = true).performScrollTo().assertIsDisplayed()
+            capture("prog-estimate")
             compose.onAllNodesWithText("病理")[1].performScrollTo().performClick()
             compose.onNodeWithText("淋巴造血系统疾病").performScrollTo().assertIsDisplayed()
             capture("prog-path")
@@ -150,7 +163,7 @@ class ScreenshotTest {
                 model.page = 3
             }
             compose.onNodeWithText("周目标").performClick()
-            compose.onNodeWithText("章节：人文 1/4章", substring = true).performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("人文 1/4章", substring = true).performScrollTo().assertIsDisplayed()
             capture("winter-week-humanities")
             compose.onNodeWithText("统计").performClick()
             compose.onNodeWithText("近 8 周学习时长（橙=未达目标）").performScrollTo().assertIsDisplayed()

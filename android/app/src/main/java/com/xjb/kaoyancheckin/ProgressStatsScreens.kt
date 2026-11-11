@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import com.xjb.kaoyancheckin.ui.theme.webColors
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.LocalDate
 import java.util.UUID
 import kotlin.math.roundToInt
 
@@ -44,6 +45,14 @@ internal fun ProgressScreen(model: CheckinViewModel) {
     val c = webColors
     val enabled = model.loadError.isEmpty()
     var deleteScoreId by remember { mutableStateOf<String?>(null) }
+    val words = wordProgress(model.state, model.today)
+    Section("单词第一轮") {
+        Text("累计已背 ${words.total} / ${words.goal}", fontWeight = FontWeight.SemiBold, color = c.text)
+        Spacer(Modifier.height(8.dp))
+        ProgressBar((words.total.toDouble() / words.goal).toFloat())
+        Spacer(Modifier.height(8.dp))
+        Tip("今日新词 ${words.todayNew} · 复习 ${words.todayReview} · 距第一轮还剩 ${words.remaining}")
+    }
     Section("计划 vs 实际（按计划线性推进）") {
         var anyChapter = false
         model.plan.subjects.forEach { subject ->
@@ -86,15 +95,15 @@ internal fun ProgressScreen(model: CheckinViewModel) {
                 Text("$done/${chapters.length()} 章", fontSize = 11.5.sp, color = c.sub, fontWeight = FontWeight.SemiBold, maxLines = 1)
                 Chip("${subject.getString("s").substring(5)}~${subject.getString("e").substring(5)}", c.accent, c.chipBlue)
             }
+            val firstDate = model.state.obj("cf").optString(subjectKey).takeIf(CheckinCore::validDate)?.let(LocalDate::parse)
+            val completionDate = model.state.obj("ce").optString(subjectKey).takeIf(CheckinCore::validDate)?.let(LocalDate::parse)
+            Text(chapterEstimate(LocalDate.parse(model.today), LocalDate.parse(subject.getString("s")),
+                LocalDate.parse(subject.getString("e")), done, chapters.length(), firstDate, completionDate),
+                Modifier.padding(start = 2.dp, bottom = 10.dp), color = c.sub, fontSize = 12.sp, lineHeight = 18.sp)
             if (expanded) chapters.values().forEachIndexed { index, chapter ->
                 val checked = flags.optBoolean(index)
                 Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable(enabled = enabled) {
-                    model.edit { state ->
-                        val updated = state.obj("ch").arr(subjectKey)
-                        while (updated.length() <= index) updated.put(false)
-                        updated.put(index, !updated.optBoolean(index))
-                        state.obj("ch").put(subjectKey, updated)
-                    }
+                    model.edit { state -> toggleChapter(state, subject, index, CheckinCore.today()) }
                 }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                     Text("${index + 1}", Modifier.size(22.dp).clip(RoundedCornerShape(7.dp)).background(if (checked) c.blue else c.line).wrapContentSize(),
                         textAlign = TextAlign.Center, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (checked) Color.White else c.sub)

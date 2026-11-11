@@ -110,6 +110,24 @@ internal fun SettingsScreen(model: CheckinViewModel, updates: UpdateViewModel, a
         Spacer(Modifier.height(8.dp))
         Tip("默认 2027-12-25 仅为规划占位，并非官方确认日期。请以正式公告为准。修改会影响倒计时与冲刺区间。")
     }
+    Section("单词第一轮") {
+        val settings = model.state.obj("settings")
+        SaveField("单词基数", settings.optInt("wordBase", CheckinCore.DEFAULT_WORD_BASE).toString(),
+            "wordBase", enabled, integer = true) { value ->
+            val parsed = value.toIntOrNull()
+            if (parsed == null || parsed !in 0..20000) model.notify("单词基数须为 0–20000 的整数")
+            else model.edit { it.obj("settings").put("wordBase", parsed) }
+        }
+        Spacer(Modifier.height(8.dp))
+        SaveField("第一轮目标", settings.optInt("wordGoal", CheckinCore.DEFAULT_WORD_GOAL).toString(),
+            "wordGoal", enabled, integer = true) { value ->
+            val parsed = value.toIntOrNull()
+            if (parsed == null || parsed !in 1..50000) model.notify("单词目标须为 1–50000 的整数")
+            else model.edit { it.obj("settings").put("wordGoal", parsed) }
+        }
+        Spacer(Modifier.height(8.dp))
+        Tip("累计已背 = 基数 + 每日新词；复习只计入当天记录。")
+    }
     Section("固定每日任务（自定义）") {
         if (model.state.arr("recur").length() == 0) Tip("没有固定任务。适合放\"跟导师课题推进\"这类长期项。")
         model.state.arr("recur").values().forEach { item ->

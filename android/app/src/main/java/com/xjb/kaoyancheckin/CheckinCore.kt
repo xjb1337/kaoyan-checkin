@@ -2,6 +2,7 @@ package com.xjb.kaoyancheckin
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Clock
@@ -17,6 +18,8 @@ fun JSONObject.copyJson(): JSONObject = JSONObject(toString())
 
 object CheckinCore {
     const val MAX_TEXT = 5 * 1024 * 1024
+    const val DEFAULT_WORD_BASE = 1300
+    const val DEFAULT_WORD_GOAL = 5500
     val shanghai: ZoneId = ZoneId.of("Asia/Shanghai")
     // Tests can fix the date; the application normally uses Shanghai system time.
     internal var clock: Clock = Clock.system(shanghai)
@@ -25,6 +28,14 @@ object CheckinCore {
     private fun fail(message: String): Nothing = throw IllegalArgumentException(message)
     private fun text(value: Any?, max: Int = MAX_TEXT) = value is String && value.length <= max
     private fun number(value: Any?) = value is Number && value.toDouble().isFinite() && value.toDouble() >= 0
+    private fun integerTextIn(value: String, min: Int, max: Int): Boolean {
+        val decimal = value.toBigDecimalOrNull() ?: return false
+        return decimal >= min.toBigDecimal() && decimal <= max.toBigDecimal() && decimal.stripTrailingZeros().scale() <= 0
+    }
+    internal fun integerIn(value: Any?, min: Int, max: Int): Boolean {
+        if (value !is Number) return false
+        return integerTextIn(value.toString(), min, max)
+    }
     private fun nullish(value: Any?, default: Any): Any = if (value == null || value === JSONObject.NULL) default else value
     private fun truthy(value: Any?): Boolean = when (value) {
         null, JSONObject.NULL, false, "" -> false
@@ -58,11 +69,13 @@ object CheckinCore {
         val custom = fallback(value.opt("c"), JSONArray())
         val hours = fallback(value.opt("sh"), JSONObject())
         val review = fallback(value.opt("rw"), JSONObject())
+        val words = if (value.has("w")) value.opt("w") else JSONObject()
         return tasks is JSONObject && tasks.namesList().all { tasks.get(it) is Boolean } &&
             custom is JSONArray && custom.values().all(::task) &&
             number(nullish(value.opt("h"), 0)) && number(nullish(value.opt("u"), 0)) &&
             hours is JSONObject && hours.namesList().all { text(it) && number(hours.get(it)) } &&
             review is JSONObject && listOf("g", "s", "n").all { text(nullish(review.opt(it), "")) } &&
+            words is JSONObject && listOf("n", "r").all { !words.has(it) || integerIn(words.opt(it), 0, 2000) } &&
             text(nullish(value.opt("note"), ""))
     }
 
@@ -87,12 +100,26 @@ object CheckinCore {
 
     fun parseBackup(raw: String): JSONObject {
         if (raw.length > MAX_TEXT) fail("备份超过 5 MB")
-        return parseBackupDocument(raw)
+        return parseBackupDocument(raw).apply { remove("_undo") }
     }
 
     fun parseBackupDocument(raw: String): JSONObject {
         val parsed = Json.parseToJsonElement(raw)
         if (parsed !is JsonObject) return normalizeState(null)
+        // Android's JSONObject can round a fractional literal before validation. Check the
+        // original JSON number text first so a non-integer cannot be silently rounded away.
+        fun validInteger(value: kotlinx.serialization.json.JsonElement, min: Int, max: Int): Boolean =
+            value is JsonPrimitive && !value.isString && integerTextIn(value.content, min, max)
+        (parsed["settings"] as? JsonObject)?.let { settings ->
+            settings["wordBase"]?.let { if (!validInteger(it, 0, 20000)) fail("单词基数须为 0–20000 的整数") }
+            settings["wordGoal"]?.let { if (!validInteger(it, 1, 50000)) fail("单词目标须为 1–50000 的整数") }
+        }
+        (parsed["days"] as? JsonObject)?.forEach { (date, value) ->
+            val words = ((value as? JsonObject)?.get("w") as? JsonObject) ?: return@forEach
+            listOf("n", "r").forEach { key ->
+                words[key]?.let { if (!validInteger(it, 0, 2000)) fail("每日数据含无效记录：$date") }
+            }
+        }
         return normalizeState(JSONObject(parsed.toString()))
     }
 
@@ -110,6 +137,8 @@ object CheckinCore {
         val recur = nullish(raw.opt("recur"), JSONArray())
         val scores = nullish(raw.opt("scores"), JSONArray())
         val chapters = nullish(raw.opt("ch"), JSONObject())
+        val firstChapters = nullish(raw.opt("cf"), JSONObject())
+        val completedChapters = nullish(raw.opt("ce"), JSONObject())
         val makeup = nullish(raw.opt("mk"), JSONArray())
         val settings = nullish(raw.opt("settings"), JSONObject())
         if (recur !is JSONArray || !recur.values().all { text(it) }) fail("固定任务格式错误")
@@ -118,11 +147,16 @@ object CheckinCore {
                 val chapter = chapters.opt(key)
                 chapter is JSONArray && chapter.values().all { it is Boolean || it === JSONObject.NULL }
             }) fail("章节格式错误")
+        if (listOf(firstChapters, completedChapters).any { dates ->
+                dates !is JSONObject || !dates.namesList().all { validDate(dates.opt(it)) }
+            }) fail("章节日期格式错误")
         if (makeup !is JSONArray || !makeup.values().all(::validDate)) fail("补签日期格式错误")
         if (settings !is JSONObject || !validDate(fallback(settings.opt("exam"), "2027-12-25"))) fail("初试日期格式错误")
         if (settings.has("backupDays") && (settings.opt("backupDays") !is Number || settings.optDouble("backupDays") !in listOf(7.0, 14.0, 30.0))) {
             fail("备份周期格式错误")
         }
+        if (settings.has("wordBase") && !integerIn(settings.opt("wordBase"), 0, 20000)) fail("单词基数须为 0–20000 的整数")
+        if (settings.has("wordGoal") && !integerIn(settings.opt("wordGoal"), 1, 50000)) fail("单词目标须为 1–50000 的整数")
         if (raw.has("_recovery") && !text(raw.opt("_recovery"))) fail("恢复副本格式错误")
         if (!number(nullish(raw.opt("upd"), 0)) || !number(nullish(raw.opt("bk"), 0))) fail("备份时间格式错误")
         val days = JSONObject()
@@ -134,16 +168,22 @@ object CheckinCore {
                 .put("rw", JSONObject().put("g", nullish(review.opt("g"), nullish(source.opt("note"), "")))
                     .put("s", nullish(review.opt("s"), "")).put("n", nullish(review.opt("n"), "")))
                 .put("u", fallback(source.opt("u"), 0))
+            if (source.has("w")) record.put("w", JSONObject().put("n", source.obj("w").optInt("n", 0)).put("r", source.obj("w").optInt("r", 0)))
             days.put(date, normalizeHours(record))
         }
         val result = JSONObject().put("schemaVersion", 2).put("days", days).put("weeks", JSONObject(weeks.toString()))
             .put("recur", JSONArray(recur.toString())).put("scores", JSONArray(scores.toString()))
-            .put("ch", chapters.copyJson()).put("mk", JSONArray(makeup.toString()))
+            .put("ch", chapters.copyJson()).put("cf", (firstChapters as JSONObject).copyJson())
+            .put("ce", (completedChapters as JSONObject).copyJson()).put("mk", JSONArray(makeup.toString()))
             .put("settings", JSONObject().put("exam", fallback(settings.opt("exam"), "2027-12-25"))
-                .put("backupDays", fallback(settings.opt("backupDays"), 7)))
+                .put("backupDays", fallback(settings.opt("backupDays"), 7))
+                .put("wordBase", settings.optInt("wordBase", DEFAULT_WORD_BASE))
+                .put("wordGoal", settings.optInt("wordGoal", DEFAULT_WORD_GOAL)))
             .put("upd", fallback(raw.opt("upd"), 0)).put("bk", fallback(raw.opt("bk"), 0))
             .put("tip", if (truthy(raw.opt("tip"))) 1 else 0)
         if (truthy(raw.opt("_recovery"))) result.put("_recovery", raw.get("_recovery"))
+        // Short-lived local undo metadata is never part of an exported backup.
+        raw.optJSONObject("_undo")?.let { if (UndoStep.fromJson(it) != null) result.put("_undo", it.copyJson()) }
         return result
     }
 
@@ -167,6 +207,7 @@ object CheckinCore {
     fun hasData(state: JSONObject): Boolean = state.obj("days").namesList().any { date ->
         val record = state.obj("days").obj(date)
         truthy(record.opt("h")) || record.obj("t").namesList().any { truthy(record.obj("t").get(it)) } ||
+            record.obj("w").optInt("n", 0) > 0 || record.obj("w").optInt("r", 0) > 0 ||
             record.arr("c").length() > 0 || record.obj("rw").namesList().any { truthy(record.obj("rw").get(it)) }
     } || state.obj("weeks").length() > 0 || state.arr("scores").length() > 0 || state.obj("ch").length() > 0 || state.arr("recur").length() > 0
 
@@ -174,7 +215,7 @@ object CheckinCore {
         (!truthy(state.opt("bk")) || (now - state.optDouble("bk", 0.0)) / 86_400_000 >= state.obj("settings").optInt("backupDays", 7))
 
     fun rollDate(selected: String, previous: String, current: String): String = if (selected == previous) current else selected
-    fun backupJSON(state: JSONObject): String = state.copyJson().apply { remove("_recovery") }.toString()
+    fun backupJSON(state: JSONObject): String = state.copyJson().apply { remove("_recovery"); remove("_undo") }.toString()
 
     fun mergeState(current: JSONObject, incoming: JSONObject): JSONObject {
         val out = current.copyJson()
@@ -190,7 +231,7 @@ object CheckinCore {
             }
         }
         if (incoming.optDouble("upd", 0.0) > current.optDouble("upd", 0.0)) {
-            listOf("recur", "scores", "ch", "mk").forEach { field ->
+            listOf("recur", "scores", "ch", "cf", "ce", "mk").forEach { field ->
                 if (incoming.get(field).toString() != current.get(field).toString()) {
                     val value = incoming.get(field)
                     out.put(field, if (value is JSONObject) value.copyJson() else JSONArray(value.toString()))
@@ -211,6 +252,7 @@ object CheckinCore {
         require(mode in listOf("merge", "replace"))
         val incoming = parseBackup(raw)
         val merged = if (mode == "replace" || recoveryRaw != null) incoming else mergeState(current, incoming)
+        merged.remove("_undo")
         return normalizeState(merged.put("upd", now).put("_recovery", recoveryRaw ?: backupJSON(current)))
     }
 }
