@@ -34,7 +34,7 @@ import java.time.LocalDate
 
 // Web vSet: exam, recurring tasks, makeup cards, backup/recovery and danger controls.
 @Composable
-internal fun SettingsScreen(model: CheckinViewModel) {
+internal fun SettingsScreen(model: CheckinViewModel, updates: UpdateViewModel) {
     val context = LocalContext.current
     val focus = LocalFocusManager.current
     val scope = rememberCoroutineScope()
@@ -177,8 +177,9 @@ internal fun SettingsScreen(model: CheckinViewModel) {
         Spacer(Modifier.height(10.dp))
         WebButton("清空打卡数据", { confirm = "wipe" }, Modifier.fillMaxWidth(), enabled, big = true, danger = true)
     }
+    UpdateSettings(updates)
     Section("同步状态") {
-        Tip("⚪ 独立模式：数据保存在本机，不会自动同步到网页。换手机或清除数据前，请导出 JSON 并保存到手机外。")
+        Tip("数据保存在本机，不会自动同步到网页或云。检查应用更新时会访问 GitHub。换手机或清除数据前，请导出 JSON 并保存到手机外。")
     }
     if (confirm.isNotEmpty()) {
         val action = confirm
