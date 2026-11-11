@@ -113,19 +113,15 @@ internal fun TodayScreen(model: CheckinViewModel) {
         (listOf("西综", "英语", "政治", "其他") + record.obj("sh").namesList()).distinct().forEach { subject ->
             val current = record.obj("sh").optDouble(subject, 0.0)
             // Keep the stored precision in the editable field; only the summary rounds to one decimal.
-            var draft by rememberSaveable(date, subject, current) { mutableStateOf(current.toString()) }
             Divider()
             Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(subject, Modifier.weight(1f), fontSize = 14.sp, color = webColors.text)
-                WebButton("−", { adjustHours(model, date, subject, -.5) }, Modifier.width(44.dp), enabled,
+                WebButton("−", { model.adjustHours(date, subject, -.5) }, Modifier.width(44.dp), enabled,
                     hourButton = true, accessibilityLabel = "减少${subject}半小时")
-                WebInput(draft, { draft = it }, "$subject 小时", Modifier.width(64.dp), enabled = enabled, numeric = true, textAlign = TextAlign.Center)
-                WebButton("＋", { adjustHours(model, date, subject, .5) }, Modifier.width(44.dp), enabled,
+                AutoSaveInput(model, DraftField.Hours(date, subject), current.toString(), "$subject 小时",
+                    Modifier.width(64.dp), enabled = enabled, numeric = true, textAlign = TextAlign.Center)
+                WebButton("＋", { model.adjustHours(date, subject, .5) }, Modifier.width(44.dp), enabled,
                     hourButton = true, accessibilityLabel = "增加${subject}半小时")
-            }
-            if (enabled && draft != current.toString()) {
-                WebButton("保存$subject / 小时", { model.setHours(date, subject, draft.toDoubleOrNull() ?: Double.NaN) })
-                Spacer(Modifier.height(7.dp))
             }
         }
         Tip("每次增减 0.5 小时，也可直接修改。总时长自动相加。")
@@ -134,7 +130,7 @@ internal fun TodayScreen(model: CheckinViewModel) {
     Section("三问复盘 · 写一句也可以") {
         listOf("g" to "今天最大的收获", "s" to "今天卡住的地方", "n" to "明天第一件事").forEachIndexed { index, (field, title) ->
             if (index > 0) Spacer(Modifier.height(8.dp))
-            SaveField(title, record.obj("rw").optString(field), "$date-review-$field", enabled, placeholder = "…") { value -> model.editDay(date) { it.obj("rw").put(field, value) } }
+            AutoSaveField(model, DraftField.DayReview(date, field), title, record.obj("rw").optString(field), enabled, placeholder = "…")
         }
     }
     var stageExpanded by rememberSaveable { mutableStateOf(false) }
@@ -164,15 +160,6 @@ internal fun TodayScreen(model: CheckinViewModel) {
     deleteTarget?.let { id ->
         ConfirmDialog("删除这条任务？", "只删除 $date 的当天记录，固定任务设置不会改变。",
             { deleteTarget = null }) { model.deleteCustomTask(date, id) }
-    }
-}
-
-// Read the latest value inside the existing serialized edit so rapid taps are not lost.
-private fun adjustHours(model: CheckinViewModel, date: String, subject: String, delta: Double) {
-    model.editDay(date) { record ->
-        val value = (record.obj("sh").optDouble(subject, 0.0) + delta).coerceAtLeast(0.0)
-        val updated = CheckinCore.setHours(record, subject, value)
-        record.put("h", updated.get("h")).put("sh", updated.get("sh"))
     }
 }
 
@@ -206,8 +193,8 @@ internal fun WeekScreen(model: CheckinViewModel) {
                     RoundCheck(record.arr("md").optBoolean(index))
                 }
                 Box(Modifier.weight(1f)) {
-                    SaveField("目标 ${index + 1}", record.arr("must").optString(index), "$week-must-$index", enabled,
-                        showLabel = false, placeholder = "目标 ${index + 1}，如：生理第 3-4 章网课+章节题") { value -> model.editWeek(week) { it.arr("must").put(index, value) } }
+                    AutoSaveField(model, DraftField.WeekGoal(week, index), "目标 ${index + 1}", record.arr("must").optString(index), enabled,
+                        showLabel = false, placeholder = "目标 ${index + 1}，如：生理第 3-4 章网课+章节题")
                 }
             }
             Divider()
@@ -231,8 +218,8 @@ internal fun WeekScreen(model: CheckinViewModel) {
         AddField("加一条弹性任务…", enabled) { name -> model.editWeek(week) { it.arr("ex").put(JSONObject().put("n", name).put("d", false)) } }
     }
     Section("周日复盘（30 分钟）") {
-        SaveField("本周回顾与下周调整", record.optString("review"), "$week-review", enabled, singleLine = false, showLabel = false,
-            placeholder = "本周完成度如何？没完成的原因？下周怎么调整？") { value -> model.editWeek(week) { it.put("review", value) } }
+        AutoSaveField(model, DraftField.WeekReview(week), "本周回顾与下周调整", record.optString("review"), enabled, singleLine = false, showLabel = false,
+            placeholder = "本周完成度如何？没完成的原因？下周怎么调整？")
     }
     // Web .rep: the report is derived from the records already exposed by the ViewModel.
     Section("自动周报") {

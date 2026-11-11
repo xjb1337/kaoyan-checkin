@@ -60,6 +60,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
     testImplementation(platform("androidx.compose:compose-bom:2024.09.03"))
     testImplementation("androidx.compose.ui:ui-test-junit4")
     testImplementation("androidx.test:core:1.6.1")

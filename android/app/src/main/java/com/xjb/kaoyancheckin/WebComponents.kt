@@ -151,7 +151,7 @@ internal fun TaskRow(label: String, checked: Boolean, enabled: Boolean = true, t
     Divider()
 }
 
-// Web input/textarea; callers retain the existing explicit-save behavior.
+// Web input/textarea; callers choose how their value is saved.
 @Composable
 internal fun WebInput(
     value: String, onValueChange: (String) -> Unit, placeholder: String, modifier: Modifier = Modifier,
@@ -191,6 +191,24 @@ internal fun SaveField(label: String, saved: String, identity: String, enabled: 
         WebInput(draft, { draft = it }, placeholder, Modifier.fillMaxWidth(), enabled, numeric, singleLine,
             minHeight = if (singleLine) 44.dp else 70.dp, trailing = trailing)
         if (enabled && draft != saved) WebButton("保存$label", { save(draft) })
+    }
+}
+
+@Composable
+internal fun AutoSaveInput(model: CheckinViewModel, field: DraftField, saved: String, placeholder: String,
+    modifier: Modifier = Modifier, enabled: Boolean = true, numeric: Boolean = false, singleLine: Boolean = true,
+    textAlign: TextAlign = TextAlign.Start) {
+    DisposableEffect(model, field) { onDispose { model.flushDraft(field) } }
+    WebInput(model.draftValue(field, saved), { model.updateDraft(field, it) }, placeholder, modifier,
+        enabled, numeric, singleLine, minHeight = if (singleLine) 44.dp else 70.dp, textAlign = textAlign)
+}
+
+@Composable
+internal fun AutoSaveField(model: CheckinViewModel, field: DraftField, label: String, saved: String,
+    enabled: Boolean = true, singleLine: Boolean = true, showLabel: Boolean = true, placeholder: String = label) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (showLabel) Text(label, fontSize = 11.5.sp, color = webColors.sub)
+        AutoSaveInput(model, field, saved, placeholder, Modifier.fillMaxWidth(), enabled, singleLine = singleLine)
     }
 }
 

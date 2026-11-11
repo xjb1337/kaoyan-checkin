@@ -47,10 +47,16 @@ class MainActivity : ComponentActivity() {
 private fun CheckinApp(model: CheckinViewModel = viewModel()) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    DisposableEffect(lifecycle) {
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) model.resume() }
+    DisposableEffect(lifecycle, model) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> model.resume()
+                Lifecycle.Event.ON_PAUSE -> model.flushDrafts()
+                else -> Unit
+            }
+        }
         lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
+        onDispose { model.flushDrafts(); lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(model) { model.events.collect { Toast.makeText(context, it, Toast.LENGTH_LONG).show() } }
     LaunchedEffect(lifecycle) {
