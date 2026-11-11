@@ -22,11 +22,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xjb.kaoyancheckin.ui.theme.webColors
@@ -40,6 +43,7 @@ import kotlin.math.roundToInt
 internal fun ProgressScreen(model: CheckinViewModel) {
     val c = webColors
     val enabled = model.loadError.isEmpty()
+    var deleteScoreId by remember { mutableStateOf<String?>(null) }
     Section("计划 vs 实际（按计划线性推进）") {
         var anyChapter = false
         model.plan.subjects.forEach { subject ->
@@ -113,7 +117,7 @@ internal fun ProgressScreen(model: CheckinViewModel) {
                 Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("${score.getString("d")} ${score.optString("n")}", Modifier.weight(1f), fontSize = 13.sp, color = c.text)
                     Text("${score.getDouble("tot")}", color = if (score.getDouble("tot") >= 200) c.green else c.red, fontWeight = FontWeight.Bold)
-                    WebButton("删除", { model.edit { state -> state.put("scores", JSONArray(state.arr("scores").values().filter { (it as JSONObject).getString("id") != score.getString("id") })) } }, enabled = enabled)
+                    WebButton("删除", { deleteScoreId = score.getString("id") }, enabled = enabled)
                 }
                 val partText = ScoreEntry.describe(score.obj("p"))
                 if (partText.isNotEmpty()) Tip(partText)
@@ -185,6 +189,20 @@ internal fun ProgressScreen(model: CheckinViewModel) {
                 }
             }
         }, Modifier.fillMaxWidth(), enabled, big = true, primary = true)
+    }
+    deleteScoreId?.let { id ->
+        ConfirmDialog(
+            "删除这次模考记录？",
+            "只删除这条模考成绩，不会影响打卡记录。",
+            { deleteScoreId = null },
+        ) {
+            model.edit { state ->
+                state.put(
+                    "scores",
+                    JSONArray(state.arr("scores").values().filter { (it as JSONObject).getString("id") != id }),
+                )
+            }
+        }
     }
 }
 
@@ -303,9 +321,29 @@ internal fun StatsScreen(model: CheckinViewModel) {
     }
     Section("打卡热力图（计划全程）") { HeatMap(model) }
     Section("数据健康") {
-        val last = state.optLong("bk")
-        val backup = if (last == 0L) "从未备份" else java.time.Instant.ofEpochMilli(last).atZone(CheckinCore.shanghai).toLocalDate().toString()
-        Tip("上次备份：$backup\n累计记录 ${state.obj("days").length()} 天 · 模考 ${state.arr("scores").length()} 次 · 章节数据 ${state.obj("ch").length()} 科")
+        val lastBackup = state.optLong("bk")
+        val daysAgo = if (lastBackup > 0L) {
+            (System.currentTimeMillis() - lastBackup).coerceAtLeast(0L) / 86_400_000L
+        } else null
+        val needsBackup = daysAgo != null && daysAgo >= state.obj("settings").optInt("backupDays", 7)
+        val backupLabel = when {
+            daysAgo == null -> "从未备份"
+            daysAgo == 0L -> "今天"
+            else -> "$daysAgo 天前"
+        }
+        Text(buildAnnotatedString {
+            append("上次备份：")
+            if (daysAgo == null) {
+                withStyle(SpanStyle(color = c.amber, fontWeight = FontWeight.Bold)) { append(backupLabel) }
+            } else {
+                append(backupLabel)
+                if (needsBackup) {
+                    withStyle(SpanStyle(color = c.orange, fontWeight = FontWeight.Bold)) { append(" · 该备份了") }
+                }
+            }
+        }, color = c.sub, fontSize = 13.sp, lineHeight = 20.sp)
+        Spacer(Modifier.height(6.dp))
+        Tip("累计记录 ${state.obj("days").length()} 天 · 模考 ${state.arr("scores").length()} 次 · 章节数据 ${state.obj("ch").length()} 科")
     }
 }
 

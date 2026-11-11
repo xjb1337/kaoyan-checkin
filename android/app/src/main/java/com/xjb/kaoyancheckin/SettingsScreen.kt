@@ -40,6 +40,7 @@ internal fun SettingsScreen(model: CheckinViewModel) {
     val scope = rememberCoroutineScope()
     var pasted by rememberSaveable { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
+    var retireTarget by remember { mutableStateOf<String?>(null) }
     var backupWritten by rememberSaveable { mutableStateOf(false) }
     val enabled = model.loadError.isEmpty()
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
@@ -94,7 +95,7 @@ internal fun SettingsScreen(model: CheckinViewModel) {
             val name = item as String
             Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(name, Modifier.weight(1f), color = webColors.text)
-                WebButton("停用", { model.retireTask(name) }, enabled = enabled)
+                WebButton("停用", { retireTarget = name }, enabled = enabled)
             }
             Divider()
         }
@@ -106,7 +107,9 @@ internal fun SettingsScreen(model: CheckinViewModel) {
     }
     Section("补签卡") {
         val left = model.plan.makeupLeft(model.today.take(7), model.state)
-        Tip("每月 2 张。某天漏了最低线，可在「今日」页切到那天点「🩹 用补签卡」，连胜即可保住。\n本月已用 ${2 - left} 张，剩余 $left 张。")
+        val used = model.state.arr("mk").values().map { it as String }
+        val usedLine = if (used.isEmpty()) "" else "\n已使用：${used.takeLast(6).joinToString("、")}"
+        Tip("每月 2 张。某天漏了最低线，可在「今日」页切到那天点「🩹 用补签卡」，连胜即可保住。\n本月已用 ${2 - left} 张，剩余 $left 张。$usedLine")
     }
     Section("备份与恢复") {
         val backupDate = model.state.optLong("bk").let { if (it == 0L) "从未备份" else java.time.Instant.ofEpochMilli(it).atZone(CheckinCore.shanghai).toLocalDate().toString() }
@@ -182,5 +185,12 @@ internal fun SettingsScreen(model: CheckinViewModel) {
         val title = when (action) { "merge" -> "确认合并？"; "replace" -> "完整替换当前记录？"; "previous" -> "恢复上次导入前副本？"; else -> "确定清空打卡数据？" }
         ConfirmDialog(title, if (action == "wipe") "清空不可撤销。是否已将 JSON 备份另存到手机外？" else "当前数据会保留为新的本机恢复副本。每次只保留上一份，不是备份历史。",
             { confirm = "" }) { when (action) { "merge", "replace" -> model.import(action); "previous" -> model.restorePrevious(); "wipe" -> model.wipe() } }
+    }
+    retireTarget?.let { name ->
+        ConfirmDialog(
+            "停止每天显示这项任务？",
+            "过去的记录会保留。",
+            { retireTarget = null },
+        ) { model.retireTask(name) }
     }
 }
