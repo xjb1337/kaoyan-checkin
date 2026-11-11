@@ -118,6 +118,56 @@ class StudyPlanTest {
         assertTrue(plan.isDone(day, "c:阅读"))
     }
 
+    @Test fun deletingCustomTaskOnlyChangesThatDaysCustomList() {
+        val state = CheckinCore.emptyState().put("recur", JSONArray().put("阅读"))
+        val day = StudyPlan.day()
+        day.arr("c").put(JSONObject().put("n", "阅读").put("d", true))
+        day.arr("c").put(JSONObject().put("n", "整理错题").put("d", false))
+        state.obj("days").put("2026-11-09", day)
+
+        plan.deleteCustomTask(day, "r:阅读")
+        assertEquals(listOf("整理错题"), day.arr("c").values().map { (it as JSONObject).getString("n") })
+        assertEquals(listOf("阅读"), state.arr("recur").values())
+
+        plan.deleteCustomTask(day, "c:整理错题")
+        assertEquals(0, day.arr("c").length())
+        assertEquals(listOf("阅读"), state.arr("recur").values())
+    }
+
+    @Test fun copiesPreviousWeekGoalsAndResetsCompletion() {
+        val state = CheckinCore.emptyState()
+        val previous = StudyPlan.week()
+            .put("must", JSONArray().put("生理").put("英语").put("政治"))
+            .put("md", JSONArray().put(true).put(true).put(false))
+            .put("u", 10)
+        state.obj("weeks").put("2026-11-02", previous)
+
+        assertTrue(plan.copyPreviousWeekGoals(state, "2026-11-09", 20))
+        val copied = state.obj("weeks").obj("2026-11-09")
+        assertEquals(listOf("生理", "英语", "政治"), copied.arr("must").values())
+        assertEquals(listOf(false, false, false), copied.arr("md").values())
+        assertEquals(20L, copied.getLong("u"))
+        assertEquals(listOf(true, true, false), previous.arr("md").values())
+
+        assertTrue(plan.copyPreviousWeekGoals(state, "2026-11-09", 30))
+        assertEquals(30L, copied.getLong("u"))
+    }
+
+    @Test fun missingPreviousWeekDoesNotCreateEmptyPlaceholder() {
+        val state = CheckinCore.emptyState()
+        assertFalse(plan.copyPreviousWeekGoals(state, "2026-11-09", 20))
+        assertFalse(state.obj("weeks").has("2026-11-09"))
+    }
+
+    @Test fun forwardNavigationStopsAtTodayAndCurrentWeek() {
+        assertEquals("2026-11-09", StudyPlan.nextWithinLimit("2026-11-08", "2026-11-09", 1))
+        assertNull(StudyPlan.nextWithinLimit("2026-11-09", "2026-11-09", 1))
+        assertNull(StudyPlan.nextWithinLimit("2026-11-10", "2026-11-09", 1))
+        assertEquals("2026-11-09", StudyPlan.nextWithinLimit("2026-11-02", "2026-11-09", 7))
+        assertNull(StudyPlan.nextWithinLimit("2026-11-09", "2026-11-09", 7))
+        assertNull(StudyPlan.nextWithinLimit("2026-11-16", "2026-11-09", 7))
+    }
+
     @Test fun streakCanStartYesterdayAndUsesMakeup() {
         val state = CheckinCore.emptyState().put("mk", JSONArray().put("2026-11-02").put("2026-11-03"))
         assertEquals(2, plan.streak(state, "2026-11-04"))

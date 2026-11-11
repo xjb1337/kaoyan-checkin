@@ -1,16 +1,17 @@
-# 考研打卡 Android MVP · 0.1.0
+# 考研打卡 Android · 0.3.0
 
-Kotlin + Jetpack Compose / Material 3 原生离线应用。应用 ID：`com.xjb.kaoyancheckin`，最低 Android 8.0（API 26），编译/目标 API 35。
+Kotlin + Jetpack Compose / Material 3 原生离线应用。应用 ID：`com.xjb.kaoyancheckin`，最低 Android 8.0（API 26），编译/目标 API 35。当前 `versionName` 为 0.3.0、`versionCode` 为 3，继续使用默认调试签名，可覆盖安装升级。
+
+备考计划的唯一来源是 `app/src/main/assets/plan.json`。网页中的计划常量只是历史遗留，不再与 App 同步维护，也不参与一致性对拍；以后调整计划只改 `plan.json`。
 
 ## 构建与测试
 
 需要 JDK 17、Android SDK Platform 35 / Build Tools 35，以及可访问 Google Maven、Maven Central 的网络。Gradle 8.9 Wrapper 已随源码提供，不需要系统 Gradle。
 
 ```bash
-cd /workspace/repos/kaoyan-checkin/android
-export JAVA_HOME=/home/box/jdk17 ANDROID_HOME=/home/box/android-sdk
+cd android
+export JAVA_HOME=/path/to/jdk17 ANDROID_HOME=/path/to/Android/Sdk
 export PATH="$JAVA_HOME/bin:$PATH"
-export HTTP_PROXY=http://127.0.0.1:7891 HTTPS_PROXY=http://127.0.0.1:7891
 ./gradlew testDebugUnitTest assembleDebug --no-daemon
 ```
 
@@ -20,12 +21,13 @@ export HTTP_PROXY=http://127.0.0.1:7891 HTTPS_PROXY=http://127.0.0.1:7891
 sdk.dir=/你的/Android/Sdk
 ```
 
-如未使用上述本机代理，请去掉代理环境变量。Gradle 若需要 JVM 代理，按本机网络在用户级 `~/.gradle/gradle.properties` 配置；不要把个人代理或凭据提交到仓库。
+如所在网络访问 Google Maven、Maven Central 需要代理，请自行设置 `HTTP_PROXY` / `HTTPS_PROXY`，或在用户级 `~/.gradle/gradle.properties` 配置 JVM 代理；不要把个人代理或凭据提交到仓库。
 
 - APK：`app/build/outputs/apk/debug/app-debug.apk`（开发调试签名，不是发布包）。
 - JVM 报告：`app/build/reports/tests/testDebugUnitTest/index.html`。
-- 核心测试：`CheckinCoreTest` 对应网页 `tests/core.test.cjs`，包括迁移、拒绝规则、深复制与时长；`MergeImportTest` 覆盖合并、替换、恢复和失败不改输入；`StudyPlanTest` 覆盖阶段、最低线、补签、任务与连胜。
-- 计划原文一致性检查：在仓库根目录运行 `node android/tools/verify-web-plan.cjs`，无需 npm 安装。
+- 核心测试：`CheckinCoreTest` 覆盖迁移、拒绝规则、深复制与时长；`MergeImportTest` 覆盖合并、替换、恢复和失败不改输入；`StudyPlanTest` 覆盖阶段、最低线、补签、任务与连胜；`DraftSaverTest`、`DraftPatchTest`、`DraftLifecycleTest` 覆盖防抖自动保存和字段补丁；`ScoreEntryTest`、`ScoreChartMathTest` 覆盖模考分科与趋势图坐标。
+- 计划文件校验：在仓库根目录运行 `node android/tools/verify-plan.cjs`，无需 npm 安装。脚本只校验 `plan.json` 可解析，并抽查 `START`、`HISTORY_START`、`LEGACY_PHASE`、`PHASES`、`PH4`、`PH5`、`SUBJ`、`MILES` 的基本结构，不再读取网页或要求两边逐字一致。
+- Android CI：`.github/workflows/android.yml` 在 push 和 pull_request 时使用 JDK 17、Android SDK 35 运行 `./gradlew --no-daemon testDebugUnitTest assembleDebug`，并先执行上面的计划校验。默认单测不包含截图类。
 
 技术版本固定为 AGP 8.7.3、Kotlin 1.9.24、KSP 1.9.24-1.0.20、Compose BOM 2024.09.03、Compose Compiler 1.5.14、Room 2.6.1。没有通知、相机、更新服务、网页套壳或网络权限。
 
@@ -83,21 +85,25 @@ _recovery?: string
 
 ## 六页使用
 
-- **今日**：前后日期、阶段与最低线、固定/自定义任务、各科时长、收获/难点/明天三问、连续打卡与初试倒计时。文本和时长修改后点击其下方「保存…」，再离开页面。空白浏览日期不会创建占位记录。
-- **进度**：展开各科章节勾选；添加/删除西综总分，导入的分科成绩保留并显示。
-- **周目标**：周一为起点，三件必做与完成标记、额外任务增删、周复盘。
-- **统计**：累计小时、分科小时、连胜与近 14 天最低线条形摘要。
-- **节点**：网页原文的阶段路线与 17 个关键提醒；所有“预计”日期仍只是规划占位。
-- **设置**：初试日期、固定任务、7/14/30 天备份提醒、文件/粘贴导入预览、合并/完整恢复、恢复上一份和确认清空。清空与网页一致保留设置和固定任务，删除其余学习数据及恢复副本。
+- **今日**：前后日期与日期选择器不能跳到今天之后；显示阶段、最低线、固定/自定义任务、各科时长、收获/难点/明天三问、连续打卡与初试倒计时。三问复盘、周目标和手输时长采用 600ms 防抖自动保存，切页、退到后台或组件销毁时立即 flush；勾选和加减时长即时保存。自定义任务可删除当天记录，确认后只影响当天，不改固定任务。空白浏览日期不会创建占位记录。
+- **进度**：展开各科章节勾选；记录模考总分及可选的生理、生化、病理、内科、外科分科得分，趋势图带坐标刻度和 200 分参考线；删除模考记录需确认。
+- **周目标**：周一为起点，三件必做与完成标记、额外任务增删、周复盘；支持复制上周目标和复制自动周报文字。未来周只读。
+- **统计**：累计小时、分科小时、连胜、本周及前两周最低线完成率、近 8 周学习时长柱状图和计划全程热力图。数据健康按网页语义显示备份相对时间：「今天」或「X 天前」，从未备份时醒目显示「从未备份」，达到提醒周期时提示「该备份了」。
+- **节点**：网页原文的阶段路线与 18 个关键提醒；所有“预计”日期仍只是规划占位。
+- **设置**：初试日期、固定任务（停用需确认）、补签卡（显示最近 6 条已用日期）、7/14/30 天备份提醒、文件/粘贴导入预览、合并/完整恢复、恢复上一份和确认清空。清空与网页一致保留设置和固定任务，删除其余学习数据及恢复副本。
 
 最低线为 `words` + `drill`，或使用补签；`fs` 阶段仅任意任务完成即达标，不接受补签代替。每个自然月最多两次补签，只能用于计划开始后且早于今天的未达标日期。`fs` 在网页中实际指初试后的复试准备阶段；考前 PH4 仍要求两项最低线。
 
 日期和文件名统一按上海时区。返回前台或前台跨零点时，只有原本正在看“今天”的页面才跟随新日期，历史选择不跳转；周导航同理。未来日期/未来周允许浏览，但不能编辑。
 
-## 验收建议与 MVP 范围
+## 验收建议
 
-手动验收：首次启动 → 导入网页 JSON → 历史任务与科目小时检查 → 改一条复盘并保存 → 强制停止并重开 → 导出并在网页检查 → 导入另一份做合并/替换 → 恢复上一份 → 用畸形 JSON 验证原数据未变。另检查未来日期只读、补签月限、取消文件选择、横屏/大字体/深色模式。
+手动验收：首次启动 → 导入网页 JSON → 检查历史任务与科目小时 → 修改复盘后等待自动保存 → 强制停止并重开 → 导出并在网页检查 → 导入另一份做合并/替换 → 恢复上一份 → 用畸形 JSON 验证原数据未变。另检查未来日期只读、补签月限与已用列表、删除模考/停用固定任务的取消与确认、备份状态提醒、取消文件选择、横屏/大字体/深色模式。
 
-当前是本机 MVP：无同步、通知、小组件、日历导出、成绩分科编辑、趋势折线、发布签名及自动化设备测试。统计用简化条形摘要；长清单使用展开而非章节搜索。下一版本建议先加入 Compose 设备交互测试、文件写入失败/Room 原子性测试、跨日与大字体验收，再考虑成绩分科输入和趋势图。恢复副本不是多版本备份历史。
+## 0.3.0 能力边界
 
-本次实现已运行 JVM 测试、APK 构建和 Android Lint；网页核心测试及计划原文一致性检查也通过。当前环境模拟器未能建立可用 ADB 连接，因此没有把安装、文件选择器、进程重启或视觉检查宣称为已完成的设备验收。
+- 已实现：复制上周目标、复制周报文字、删除自定义任务、禁止导航到未来日期、复盘/周目标/时长防抖自动保存、模考分科得分与趋势图、删除模考和停用固定任务确认框、数据健康备份相对状态、补签卡已用日期。
+- 仍未包含：通知或提醒推送、桌面小组件、日历 ICS 导入导出、正式发布签名、云同步/多设备自动同步，以及自动化模拟器或真机设备测试。
+- 恢复副本只保留上一份，不是多版本备份历史；本机 Room 保存也不是云备份。
+
+Android CI 会在 GitHub 托管 runner 上执行 JVM 单元测试、`assembleDebug` 和计划校验。JVM 截图测试默认排除，需要按上文命令手动录制；本轮未把真机安装、文件选择器或视觉检查宣称为已完成的设备验收。

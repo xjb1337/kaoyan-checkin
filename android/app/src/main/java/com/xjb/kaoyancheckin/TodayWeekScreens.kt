@@ -1,5 +1,7 @@
 package com.xjb.kaoyancheckin
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -12,6 +14,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -60,8 +63,12 @@ internal fun TodayScreen(model: CheckinViewModel) {
     val enabled = date <= model.today && model.loadError.isEmpty()
     val isToday = date == model.today
     val tasks = model.plan.tasks(date, state, model.today)
-    DateNav(date, { model.selected = StudyPlan.addDays(date, -1) }, { model.selected = StudyPlan.addDays(date, 1) },
-        { model.selected = model.today }, "今天", isToday, true) { model.selected = it }
+    val nextDate = StudyPlan.nextWithinLimit(date, model.today, 1)
+    var deleteTarget by remember(date) { mutableStateOf<String?>(null) }
+    DateNav(date, { model.selected = StudyPlan.addDays(date, -1) }, { nextDate?.let { model.selected = it } },
+        { model.selected = model.today }, "今天", isToday, true, canGoNext = nextDate != null, maxDate = model.today) {
+        if (it <= model.today) model.selected = it
+    }
     if (!isToday) Banner(if (date > model.today) "未来日期 · 仅供预览，点「今天」返回" else "正在补记 $date，点「今天」返回", "info")
     if (model.today < model.plan.start) Banner("🎯 ${shortDate(model.plan.start)} 正式开营，还有 ${daysBetween(model.today, model.plan.start)} 天 · 想提前开始也行", "info")
     if (CheckinCore.needsBackup(state, System.currentTimeMillis())) {
@@ -86,7 +93,9 @@ internal fun TodayScreen(model: CheckinViewModel) {
         else if (date >= model.plan.start) Tip("两项最低线优先；其余是阶段参考，按每周安排选择，不必每天全部完成。")
         val minimumIds = phase.arr("tasks").values().filterIsInstance<JSONObject>().filter { it.optInt("min") == 1 }.map { it.optString("id") }.toSet()
         tasks.forEach { task ->
-            TaskRow(task.label, model.plan.isDone(record, task.id), enabled, task.tag, task.id in minimumIds) {
+            val deletable = task.id.startsWith("c:") || task.id.startsWith("r:")
+            TaskRow(task.label, model.plan.isDone(record, task.id), enabled, task.tag, task.id in minimumIds,
+                onDelete = if (deletable) ({ deleteTarget = task.id }) else null) {
                 model.editDay(date) { model.plan.toggle(it, task.id) }
             }
         }
@@ -104,19 +113,15 @@ internal fun TodayScreen(model: CheckinViewModel) {
         (listOf("西综", "英语", "政治", "其他") + record.obj("sh").namesList()).distinct().forEach { subject ->
             val current = record.obj("sh").optDouble(subject, 0.0)
             // Keep the stored precision in the editable field; only the summary rounds to one decimal.
-            var draft by rememberSaveable(date, subject, current) { mutableStateOf(current.toString()) }
             Divider()
             Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(subject, Modifier.weight(1f), fontSize = 14.sp, color = webColors.text)
-                WebButton("−", { adjustHours(model, date, subject, -.5) }, Modifier.width(44.dp), enabled,
+                WebButton("−", { model.adjustHours(date, subject, -.5) }, Modifier.width(44.dp), enabled,
                     hourButton = true, accessibilityLabel = "减少${subject}半小时")
-                WebInput(draft, { draft = it }, "$subject 小时", Modifier.width(64.dp), enabled = enabled, numeric = true, textAlign = TextAlign.Center)
-                WebButton("＋", { adjustHours(model, date, subject, .5) }, Modifier.width(44.dp), enabled,
+                AutoSaveInput(model, DraftField.Hours(date, subject), current.toString(), "$subject 小时",
+                    Modifier.width(64.dp), enabled = enabled, numeric = true, textAlign = TextAlign.Center)
+                WebButton("＋", { model.adjustHours(date, subject, .5) }, Modifier.width(44.dp), enabled,
                     hourButton = true, accessibilityLabel = "增加${subject}半小时")
-            }
-            if (enabled && draft != current.toString()) {
-                WebButton("保存$subject / 小时", { model.setHours(date, subject, draft.toDoubleOrNull() ?: Double.NaN) })
-                Spacer(Modifier.height(7.dp))
             }
         }
         Tip("每次增减 0.5 小时，也可直接修改。总时长自动相加。")
@@ -125,7 +130,7 @@ internal fun TodayScreen(model: CheckinViewModel) {
     Section("三问复盘 · 写一句也可以") {
         listOf("g" to "今天最大的收获", "s" to "今天卡住的地方", "n" to "明天第一件事").forEachIndexed { index, (field, title) ->
             if (index > 0) Spacer(Modifier.height(8.dp))
-            SaveField(title, record.obj("rw").optString(field), "$date-review-$field", enabled, placeholder = "…") { value -> model.editDay(date) { it.obj("rw").put(field, value) } }
+            AutoSaveField(model, DraftField.DayReview(date, field), title, record.obj("rw").optString(field), enabled, placeholder = "…")
         }
     }
     var stageExpanded by rememberSaveable { mutableStateOf(false) }
@@ -152,14 +157,9 @@ internal fun TodayScreen(model: CheckinViewModel) {
             Tip("本机保存不等于云备份。换手机前请导出 JSON，并保存到网盘或发给自己。")
         }
     }
-}
-
-// Read the latest value inside the existing serialized edit so rapid taps are not lost.
-private fun adjustHours(model: CheckinViewModel, date: String, subject: String, delta: Double) {
-    model.editDay(date) { record ->
-        val value = (record.obj("sh").optDouble(subject, 0.0) + delta).coerceAtLeast(0.0)
-        val updated = CheckinCore.setHours(record, subject, value)
-        record.put("h", updated.get("h")).put("sh", updated.get("sh"))
+    deleteTarget?.let { id ->
+        ConfirmDialog("删除这条任务？", "只删除 $date 的当天记录，固定任务设置不会改变。",
+            { deleteTarget = null }) { model.deleteCustomTask(date, id) }
     }
 }
 
@@ -167,11 +167,13 @@ private fun adjustHours(model: CheckinViewModel, date: String, subject: String, 
 @Composable
 internal fun WeekScreen(model: CheckinViewModel) {
     val week = model.week
+    val currentWeek = StudyPlan.monday(model.today)
     val record = model.state.obj("weeks").optJSONObject(week) ?: StudyPlan.week()
-    val enabled = week <= StudyPlan.monday(model.today) && model.loadError.isEmpty()
+    val enabled = week <= currentWeek && model.loadError.isEmpty()
     val stats = weekStats(model.plan, model.state, model.today, week)
-    DateNav(week, { model.week = StudyPlan.addDays(week, -7) }, { model.week = StudyPlan.addDays(week, 7) },
-        { model.week = StudyPlan.monday(model.today) }, "本周", week == StudyPlan.monday(model.today), false)
+    val nextWeek = StudyPlan.nextWithinLimit(week, currentWeek, 7)
+    DateNav(week, { model.week = StudyPlan.addDays(week, -7) }, { nextWeek?.let { model.week = it } },
+        { model.week = currentWeek }, "本周", week == currentWeek, false, canGoNext = nextWeek != null)
     if (!enabled) Banner("未来周目标仅供预览", "info")
     Section {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -191,13 +193,14 @@ internal fun WeekScreen(model: CheckinViewModel) {
                     RoundCheck(record.arr("md").optBoolean(index))
                 }
                 Box(Modifier.weight(1f)) {
-                    SaveField("目标 ${index + 1}", record.arr("must").optString(index), "$week-must-$index", enabled,
-                        showLabel = false, placeholder = "目标 ${index + 1}，如：生理第 3-4 章网课+章节题") { value -> model.editWeek(week) { it.arr("must").put(index, value) } }
+                    AutoSaveField(model, DraftField.WeekGoal(week, index), "目标 ${index + 1}", record.arr("must").optString(index), enabled,
+                        showLabel = false, placeholder = "目标 ${index + 1}，如：生理第 3-4 章网课+章节题")
                 }
             }
             Divider()
         }
-        // The Android MVP has no copy-previous-week action; existing edits remain available.
+        Spacer(Modifier.height(4.dp))
+        WebButton("复制上周目标", { model.copyPreviousWeekGoals(week) }, enabled = enabled)
     }
     Section("弹性任务") {
         if (record.arr("ex").length() == 0) Tip("本周可做可不做的，放这里")
@@ -215,11 +218,12 @@ internal fun WeekScreen(model: CheckinViewModel) {
         AddField("加一条弹性任务…", enabled) { name -> model.editWeek(week) { it.arr("ex").put(JSONObject().put("n", name).put("d", false)) } }
     }
     Section("周日复盘（30 分钟）") {
-        SaveField("本周回顾与下周调整", record.optString("review"), "$week-review", enabled, singleLine = false, showLabel = false,
-            placeholder = "本周完成度如何？没完成的原因？下周怎么调整？") { value -> model.editWeek(week) { it.put("review", value) } }
+        AutoSaveField(model, DraftField.WeekReview(week), "本周回顾与下周调整", record.optString("review"), enabled, singleLine = false, showLabel = false,
+            placeholder = "本周完成度如何？没完成的原因？下周怎么调整？")
     }
     // Web .rep: the report is derived from the records already exposed by the ViewModel.
     Section("自动周报") {
+        val context = LocalContext.current
         val completed = (0..2).count { record.arr("md").optBoolean(it) }
         val chapters = model.plan.subjects.mapNotNull { subject ->
             val count = model.plan.chapterDone(subject, model.state)
@@ -232,5 +236,13 @@ internal fun WeekScreen(model: CheckinViewModel) {
             "章节：${chapters.ifEmpty { listOf("暂无进度") }.joinToString("、")}\n连续打卡 ${model.plan.streak(model.state, model.today)} 天。"
         Text(report, Modifier.fillMaxWidth().background(webColors.bg, RoundedCornerShape(10.dp)).padding(11.dp),
             color = webColors.text, fontSize = 12.5.sp, lineHeight = 20.sp)
+        Spacer(Modifier.height(8.dp))
+        WebButton("复制周报文字", {
+            val copied = runCatching {
+                val clipboard = context.getSystemService(ClipboardManager::class.java) ?: error("剪贴板不可用")
+                clipboard.setPrimaryClip(ClipData.newPlainText("考研周报", report))
+            }.isSuccess
+            model.notify(if (copied) "周报已复制" else "复制失败")
+        })
     }
 }

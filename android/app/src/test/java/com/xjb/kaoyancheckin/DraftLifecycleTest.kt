@@ -1,0 +1,167 @@
+package com.xjb.kaoyancheckin
+
+import android.app.Application
+import android.os.Looper
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ViewModelProvider
+import androidx.room.Room
+import androidx.test.core.app.ActivityScenario
+import androidx.test.core.app.ApplicationProvider
+import java.time.Clock
+import java.time.Instant
+import kotlinx.coroutines.runBlocking
+import org.json.JSONObject
+import org.junit.After
+import org.junit.Assert.*
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+class DraftLifecycleTest {
+    private lateinit var previousClock: Clock
+    private lateinit var app: Application
+
+    @Before fun setUp() {
+        previousClock = CheckinCore.clock
+        CheckinCore.clock = Clock.fixed(Instant.parse("2026-11-10T04:00:00Z"), CheckinCore.shanghai)
+        app = ApplicationProvider.getApplicationContext()
+        app.deleteDatabase("checkin.db")
+    }
+
+    @After fun tearDown() { CheckinCore.clock = previousClock }
+
+    @Test fun switchingTabsAndPausingPersistDraftsAlongsideOtherEdits() {
+        val date = "2026-11-10"
+        val week = "2026-11-09"
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            val model = awaitReady(scenario)
+
+            scenario.onActivity {
+                model.updateDraft(DraftField.Hours(date, "西综"), "2")
+                model.adjustHours(date, "西综", 0.5)
+                model.updateDraft(DraftField.DayReview(date, "g"), "今天的收获")
+                model.editDay(date) { it.obj("t").put("words", true) }
+                model.makeup("2026-11-08")
+                model.page = 2
+                model.updateDraft(DraftField.WeekGoal(week, 0), "本周目标")
+                model.updateDraft(DraftField.WeekReview(week), "周日复盘")
+                model.editWeek(week) { it.arr("md").put(0, true) }
+            }
+            scenario.onActivity { model.flushDrafts() }
+            scenario.moveToState(Lifecycle.State.STARTED)
+
+            awaitCondition(
+                description = "切页与暂停后的草稿、目标和其他编辑全部保存",
+                current = { "page=${model.page}, state=${model.state}" },
+            ) {
+                val state = model.state
+                val day = state.obj("days").optJSONObject(date)
+                val target = state.obj("weeks").optJSONObject(week)
+                day != null && target != null && day.obj("rw").optString("g") == "今天的收获" &&
+                    day.obj("t").optBoolean("words") && day.obj("sh").optDouble("西综") == 2.5 &&
+                    state.arr("mk").values().contains("2026-11-08") &&
+                    target.arr("must").optString(0) == "本周目标" &&
+                    target.optString("review") == "周日复盘" && target.arr("md").optBoolean(0)
+            }
+            // 落盘由 activityDestructionDoesNotCancelAFlushedWriteBeforeReload 覆盖。
+        }
+    }
+
+    @Test fun copyingGoalsAfterTypingKeepsLaterCheckboxChanges() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            val model = awaitReady(scenario)
+            val week = "2026-11-09"
+            scenario.onActivity {
+                model.editWeek("2026-11-02") { it.arr("must").put(0, "上周目标") }
+            }
+            awaitCondition(
+                description = "上周目标写入完成",
+                current = { model.state.toString() },
+            ) {
+                model.state.obj("weeks").optJSONObject("2026-11-02")?.arr("must")?.optString(0) == "上周目标"
+            }
+
+            scenario.onActivity {
+                model.page = 2
+                model.updateDraft(DraftField.WeekGoal(week, 0), "刚输入的目标")
+                model.copyPreviousWeekGoals(week)
+                model.editWeek(week) { it.arr("md").put(0, true) }
+            }
+            awaitCondition(
+                description = "复制上周目标后仍保留稍后的勾选",
+                current = { "week=${model.state.obj("weeks").optJSONObject(week)}, state=${model.state}" },
+            ) {
+                val target = model.state.obj("weeks").optJSONObject(week)
+                target != null && target.arr("must").optString(0) == "上周目标" && target.arr("md").optBoolean(0)
+            }
+        }
+    }
+
+    @Test fun activityDestructionDoesNotCancelAFlushedWriteBeforeReload() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            val model = awaitReady(scenario)
+            scenario.onActivity {
+                model.updateDraft(DraftField.DayReview("2026-11-10", "n"), "下次继续")
+                model.flushDrafts()
+            }
+            awaitCondition(
+                description = "销毁前的草稿写入完成",
+                current = { "ready=${model.ready}, state=${model.state}" },
+            ) {
+                model.state.obj("days").obj("2026-11-10").obj("rw").optString("n") == "下次继续"
+            }
+        }
+
+        val persisted = readPersisted()
+        assertEquals("下次继续", persisted.obj("days").obj("2026-11-10").obj("rw").optString("n"))
+
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            val reloaded = awaitReady(scenario)
+            assertEquals("下次继续", reloaded.state.obj("days").obj("2026-11-10").obj("rw").optString("n"))
+        }
+    }
+
+    private fun awaitReady(scenario: ActivityScenario<MainActivity>): CheckinViewModel {
+        lateinit var model: CheckinViewModel
+        scenario.onActivity { model = ViewModelProvider(it)[CheckinViewModel::class.java] }
+        awaitCondition(
+            description = "ViewModel 加载完成",
+            current = { "ready=${model.ready}, loadError=${model.loadError}" },
+        ) { model.ready }
+        check(model.loadError.isEmpty()) { model.loadError }
+        return model
+    }
+
+    private fun awaitCondition(
+        description: String,
+        timeoutMillis: Long = 15_000,
+        current: () -> Any? = { "" },
+        condition: () -> Boolean,
+    ) {
+        val looper = shadowOf(Looper.getMainLooper())
+        val deadline = System.nanoTime() + timeoutMillis * 1_000_000
+        while (true) {
+            looper.idle()
+            if (condition()) return
+            if (System.nanoTime() >= deadline) break
+            Thread.sleep(20)
+        }
+        fail("等待 $description 超时（${timeoutMillis}ms）；当前状态：${current()}")
+    }
+
+    private fun readPersisted(): JSONObject {
+        val database = Room.databaseBuilder(app, CheckinDatabase::class.java, "checkin.db").build()
+        return try {
+            JSONObject(checkNotNull(runBlocking { database.document().read() }))
+        } finally {
+            database.close()
+        }
+    }
+}
