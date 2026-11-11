@@ -34,6 +34,9 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
         private set
     var ready by mutableStateOf(false)
         private set
+    internal var pendingUndo by mutableStateOf<UndoStep?>(null)
+        private set
+    private var dismissedUndo: String? = null
     var loadError by mutableStateOf("")
         private set
     private var recoveryRaw: String? = null
@@ -71,6 +74,7 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
                 rawOnFailure = raw
                 if (raw == null) CheckinCore.emptyState() else CheckinCore.parseBackupDocument(raw)
             }
+            pendingUndo = liveUndo(state, System.currentTimeMillis())?.takeUnless { it.token == dismissedUndo }
             recoveryRaw = null
             loadError = ""
         } catch (e: CancellationException) {
@@ -130,7 +134,14 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
         editDayRecord(it, date, CheckinCore.today(), System.currentTimeMillis(), block)
     }
     fun toggleTask(date: String, id: String) = change {
-        toggleDayTask(it, plan, date, CheckinCore.today(), id, System.currentTimeMillis())
+        toggleTaskWithUndo(it, plan, date, CheckinCore.today(), id, System.currentTimeMillis())
+    }
+    internal fun dismissUndo(token: String) {
+        dismissedUndo = token
+        if (pendingUndo?.token == token) pendingUndo = null
+    }
+    internal fun undoTask(step: UndoStep) = change(noChange = "撤销已过期或任务已变化") {
+        undoTask(it, plan, step.token, CheckinCore.today(), System.currentTimeMillis())
     }
     fun editWeek(date: String = week, block: (JSONObject) -> Unit) = change {
         require(date <= StudyPlan.monday(CheckinCore.today())) { "未来周目标只读" }

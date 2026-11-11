@@ -52,6 +52,8 @@ class DraftLifecycleTest {
                 model.updateDraft(DraftField.Hours(date, "西综"), "2")
                 model.adjustHours(date, "西综", 0.5)
                 model.updateDraft(DraftField.DayReview(date, "g"), "今天的收获")
+                model.updateDraft(DraftField.Words(date, "n"), "35")
+                model.updateDraft(DraftField.Words(date, "r"), "80")
                 model.editDay(date) { it.obj("t").put("words", true) }
                 model.makeup("2026-11-08")
                 model.page = 2
@@ -70,6 +72,7 @@ class DraftLifecycleTest {
                 val day = state.obj("days").optJSONObject(date)
                 val target = state.obj("weeks").optJSONObject(week)
                 day != null && target != null && day.obj("rw").optString("g") == "今天的收获" &&
+                    day.obj("w").optInt("n") == 35 && day.obj("w").optInt("r") == 80 &&
                     day.obj("t").optBoolean("words") && day.obj("sh").optDouble("西综") == 2.5 &&
                     state.arr("mk").values().contains("2026-11-08") &&
                     target.arr("must").optString(0) == "本周目标" &&

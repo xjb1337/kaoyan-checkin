@@ -13,6 +13,7 @@ internal sealed interface DraftField {
     data class WeekGoal(val week: String, val index: Int) : DraftField
     data class WeekReview(val week: String) : DraftField
     data class Hours(val date: String, val subject: String) : DraftField
+    data class Words(val date: String, val field: String) : DraftField
 }
 
 // Called with a copy of the latest state while the shared repository's write mutex is held.
@@ -58,6 +59,18 @@ internal fun patchDraft(state: JSONObject, field: DraftField, value: String, tod
             if (updated.obj("sh").getDouble(field.subject) == day.obj("sh").optDouble(field.subject, 0.0)) return null
             updated.put("u", now)
             days.put(field.date, updated)
+        }
+        is DraftField.Words -> {
+            require(CheckinCore.validDate(field.date) && field.date <= today) { "未来日期只读" }
+            require(field.field in listOf("n", "r")) { "单词字段无效" }
+            val amount = if (value.isBlank()) 0 else value.toIntOrNull()
+            require(amount != null && amount in 0..2000) { "单词数量须为 0–2000 的整数" }
+            val days = state.obj("days")
+            val existing = days.optJSONObject(field.date)
+            if ((existing?.obj("w")?.optInt(field.field, 0) ?: 0) == amount) return null
+            val day = existing ?: StudyPlan.day()
+            day.put("w", day.obj("w").put(field.field, amount)).put("u", now)
+            days.put(field.date, day)
         }
     }
     return state

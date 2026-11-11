@@ -98,6 +98,19 @@ internal fun TodayScreen(model: CheckinViewModel) {
                 onDelete = if (deletable) ({ deleteTarget = task.id }) else null) {
                 model.toggleTask(date, task.id)
             }
+            if (task.id == "words") {
+                Row(Modifier.fillMaxWidth().padding(start = 32.dp, top = 8.dp, bottom = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    listOf("n" to "新词", "r" to "复习").forEach { (field, label) ->
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(label, fontSize = 12.sp, color = webColors.sub)
+                            val count = record.obj("w").optInt(field, 0)
+                            AutoSaveInput(model, DraftField.Words(date, field), if (count == 0) "" else count.toString(),
+                                "$label 数量", Modifier.fillMaxWidth(), enabled = enabled, integer = true)
+                        }
+                    }
+                }
+            }
         }
         AddField("加一条临时任务…", enabled) { name -> model.editDay(date) { day ->
             require(day.arr("c").values().none { (it as JSONObject).optString("n") == name }) { "任务已存在" }

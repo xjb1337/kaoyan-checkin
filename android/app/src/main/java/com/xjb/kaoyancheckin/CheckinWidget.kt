@@ -184,12 +184,7 @@ class WidgetActionReceiver : BroadcastReceiver() {
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
                 val plan = StudyPlan(JSONObject(context.assets.open("plan.json").bufferedReader().use { it.readText() }))
-                CheckinRepository.get(context).update { state ->
-                    val today = CheckinCore.today()
-                    require(date == today) { "日期已变化，请重新操作" }
-                    require(widgetSnapshot(plan, state, today).tasks.any { it.id == id }) { "任务已变化，请重新操作" }
-                    toggleDayTask(state, plan, date, today, id, System.currentTimeMillis())
-                }
+                toggleWidgetTask(CheckinRepository.get(context), plan, date, id)
             } catch (e: Exception) {
                 kotlinx.coroutines.withContext(Dispatchers.Main) {
                     Toast.makeText(context, "小组件未保存，请打开应用检查存档", Toast.LENGTH_LONG).show()

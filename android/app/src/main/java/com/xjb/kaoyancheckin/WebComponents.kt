@@ -157,7 +157,7 @@ internal fun WebInput(
     value: String, onValueChange: (String) -> Unit, placeholder: String, modifier: Modifier = Modifier,
     enabled: Boolean = true, numeric: Boolean = false, singleLine: Boolean = true,
     minHeight: androidx.compose.ui.unit.Dp = 44.dp, textAlign: TextAlign = TextAlign.Start,
-    trailing: (@Composable () -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null, integer: Boolean = false,
 ) {
     val c = webColors
     val focus = LocalFocusManager.current
@@ -165,7 +165,7 @@ internal fun WebInput(
         modifier = modifier.heightIn(min = minHeight).semantics { contentDescription = placeholder },
         textStyle = androidx.compose.ui.text.TextStyle(color = c.text, fontSize = 16.sp, lineHeight = 23.sp, textAlign = textAlign),
         cursorBrush = SolidColor(c.accent),
-        keyboardOptions = KeyboardOptions(keyboardType = if (numeric) KeyboardType.Decimal else KeyboardType.Text,
+        keyboardOptions = KeyboardOptions(keyboardType = if (integer) KeyboardType.Number else if (numeric) KeyboardType.Decimal else KeyboardType.Text,
             imeAction = if (singleLine) ImeAction.Done else ImeAction.Default),
         keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
         decorationBox = { inner ->
@@ -184,12 +184,12 @@ internal fun WebInput(
 @Composable
 internal fun SaveField(label: String, saved: String, identity: String, enabled: Boolean = true, numeric: Boolean = false,
     singleLine: Boolean = true, showLabel: Boolean = true, placeholder: String = label,
-    trailing: (@Composable () -> Unit)? = null, save: (String) -> Unit) {
+    trailing: (@Composable () -> Unit)? = null, integer: Boolean = false, save: (String) -> Unit) {
     var draft by rememberSaveable(identity, saved) { mutableStateOf(saved) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (showLabel) Text(label, fontSize = 11.5.sp, color = webColors.sub)
         WebInput(draft, { draft = it }, placeholder, Modifier.fillMaxWidth(), enabled, numeric, singleLine,
-            minHeight = if (singleLine) 44.dp else 70.dp, trailing = trailing)
+            minHeight = if (singleLine) 44.dp else 70.dp, trailing = trailing, integer = integer)
         if (enabled && draft != saved) WebButton("保存$label", { save(draft) })
     }
 }
@@ -197,10 +197,10 @@ internal fun SaveField(label: String, saved: String, identity: String, enabled: 
 @Composable
 internal fun AutoSaveInput(model: CheckinViewModel, field: DraftField, saved: String, placeholder: String,
     modifier: Modifier = Modifier, enabled: Boolean = true, numeric: Boolean = false, singleLine: Boolean = true,
-    textAlign: TextAlign = TextAlign.Start) {
+    textAlign: TextAlign = TextAlign.Start, integer: Boolean = false) {
     DisposableEffect(model, field) { onDispose { model.flushDraft(field) } }
     WebInput(model.draftValue(field, saved), { model.updateDraft(field, it) }, placeholder, modifier,
-        enabled, numeric, singleLine, minHeight = if (singleLine) 44.dp else 70.dp, textAlign = textAlign)
+        enabled, numeric, singleLine, minHeight = if (singleLine) 44.dp else 70.dp, textAlign = textAlign, integer = integer)
 }
 
 @Composable
