@@ -8,11 +8,16 @@ import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.RemoteViews
 import android.widget.Toast
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import com.xjb.kaoyancheckin.ui.theme.AppTheme
+import com.xjb.kaoyancheckin.ui.theme.paletteFor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -91,32 +96,65 @@ class CheckinWidget : AppWidgetProvider() {
         }
 
         internal fun views(context: Context, widgetId: Int, snapshot: WidgetSnapshot?, width: Int, height: Int): RemoteViews {
+            val theme = ThemeRepository(context).load()
+            val night = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+            // Distinct host layout IDs force reinflation when a live process observes a night-mode change.
+            // Each host also carries both palettes; its resource-selected branch works after the provider
+            // process is killed and the launcher later reinflates the saved RemoteViews.
+            val host = RemoteViews(context.packageName, if (night) R.layout.checkin_widget_host_dark else R.layout.checkin_widget_host_light)
+            host.removeAllViews(R.id.widget_light)
+            host.removeAllViews(R.id.widget_dark)
+            host.addView(R.id.widget_light, themedViews(context, widgetId, snapshot, width, height, theme, false))
+            host.addView(R.id.widget_dark, themedViews(context, widgetId, snapshot, width, height, theme, true))
+            return host
+        }
+
+        private fun themedViews(
+            context: Context, widgetId: Int, snapshot: WidgetSnapshot?, width: Int, height: Int,
+            theme: AppTheme, dark: Boolean,
+        ): RemoteViews {
+            val c = paletteFor(theme, dark)
+            val density = context.resources.displayMetrics.density
+            val layout = widgetLayout(width, height, snapshot?.required ?: 2)
+            val status = widgetStatus(snapshot)
             val views = RemoteViews(context.packageName, R.layout.checkin_widget)
             val open = Intent(context, MainActivity::class.java).setAction(OPEN_TODAY)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             val openIntent = PendingIntent.getActivity(context, widgetId, open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.widget_root, openIntent)
+            views.setImageViewBitmap(R.id.widget_backdrop, WidgetArtwork.backdrop(width, height, density, c))
+            views.setImageViewBitmap(R.id.widget_header_bg, WidgetArtwork.header(width, density, c, status, snapshot?.satisfied == true))
+            views.setImageViewBitmap(R.id.widget_streak_bg, WidgetArtwork.badge(density, c))
             views.setTextViewText(R.id.widget_streak, snapshot?.let { "连续 ${it.streak} 天" } ?: "打开应用")
-            val summary = when {
-                snapshot == null -> "存档无法读取，请打开应用处理"
-                snapshot.beforePlan -> "计划尚未开始"
-                snapshot.satisfied -> "最低线 ${snapshot.completed}/${snapshot.required} · 已达标"
-                else -> "最低线 ${snapshot.completed}/${snapshot.required}"
-            }
-            views.setTextViewText(R.id.widget_summary, summary)
+            views.setTextViewText(R.id.widget_summary, status.summary)
+            views.setTextColor(R.id.widget_title, c.text.toArgb())
+            val summaryColor = if (snapshot?.satisfied == true) {
+                if (dark) c.greenTag else Color(0xFF047857)
+            } else c.text
+            views.setTextColor(R.id.widget_summary, summaryColor.toArgb())
+            views.setTextColor(R.id.widget_streak, c.accent.toArgb())
+            views.setTextColor(R.id.widget_empty, c.sub.toArgb())
+            views.setViewVisibility(R.id.widget_title, if (layout.showTitle) View.VISIBLE else View.GONE)
             views.removeAllViews(R.id.widget_tasks)
-            val compact = width < 200 || height < 90
-            views.setViewVisibility(R.id.widget_title, if (width < 200) View.GONE else View.VISIBLE)
-            views.setViewVisibility(R.id.widget_tasks, if (compact || snapshot == null) View.GONE else View.VISIBLE)
-            if (!compact && snapshot != null) {
-                val columns = if (snapshot.required == 1) 2 else 1
-                val maxRows = if (height >= 180) 4 else 2
-                snapshot.tasks.take(columns * maxRows).chunked(columns).forEach { tasks ->
+            val visibleTasks = if (layout.compact) emptyList() else snapshot?.tasks.orEmpty().take(layout.columns * layout.maxRows)
+            views.setViewVisibility(R.id.widget_tasks, if (visibleTasks.isNotEmpty()) View.VISIBLE else View.GONE)
+            val showEmpty = !layout.compact && visibleTasks.isEmpty()
+            views.setViewVisibility(R.id.widget_empty, if (showEmpty) View.VISIBLE else View.GONE)
+            if (showEmpty) views.setTextViewText(R.id.widget_empty, when {
+                snapshot == null -> "点击打开应用处理"
+                snapshot.beforePlan -> "计划开始后显示今日任务"
+                else -> "打开应用查看今日任务"
+            })
+            if (snapshot != null) {
+                val checked = WidgetArtwork.check(density, c, true)
+                val unchecked = WidgetArtwork.check(density, c, false)
+                visibleTasks.chunked(layout.columns).forEach { tasks ->
                     val row = RemoteViews(context.packageName, R.layout.checkin_widget_row)
                     tasks.forEach { task ->
                         val item = RemoteViews(context.packageName, R.layout.checkin_widget_task)
-                        val prefix = if (task.done) "☑ " else "☐ "
-                        item.setTextViewText(R.id.widget_task, prefix + task.label)
+                        item.setImageViewBitmap(R.id.widget_check, if (task.done) checked else unchecked)
+                        item.setTextViewText(R.id.widget_task_text, task.label)
+                        item.setTextColor(R.id.widget_task_text, (if (task.done) c.sub else c.text).toArgb())
                         item.setContentDescription(R.id.widget_task, "${task.label}，${if (task.done) "已完成，点击取消" else "未完成，点击完成"}")
                         val intent = Intent(context, WidgetActionReceiver::class.java).setAction(TOGGLE)
                             .setData(Uri.Builder().scheme("checkin").authority("widget").appendPath(widgetId.toString())

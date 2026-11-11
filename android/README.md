@@ -28,6 +28,7 @@ sdk.dir=/你的/Android/Sdk
 - 核心测试：`CheckinCoreTest` 覆盖迁移、拒绝规则、深复制与时长；`MergeImportTest` 覆盖合并、替换、恢复和失败不改输入；`StudyPlanTest` 覆盖阶段、最低线、补签、任务与连胜；`DraftSaverTest`、`DraftPatchTest`、`DraftLifecycleTest` 覆盖防抖自动保存和字段补丁；`ScoreEntryTest`、`ScoreChartMathTest` 覆盖模考分科与趋势图坐标。
 - 计划文件校验：在仓库根目录运行 `node android/tools/verify-plan.cjs`，无需 npm 安装。脚本只校验 `plan.json` 可解析，并抽查 `START`、`HISTORY_START`、`LEGACY_PHASE`、`PHASES`、`PH4`、`PH5`、`SUBJ`、`MILES` 的基本结构，不再读取网页或要求两边逐字一致。
 - Android CI：`.github/workflows/android.yml` 在 push 和 pull_request 时使用 JDK 17、Android SDK 35 运行 `./gradlew --no-daemon testDebugUnitTest assembleDebug`，并先执行上面的计划校验。默认单测不包含截图类。新增的 `WidgetSnapshotTest`、`UpdateProtocolTest` 和 `UpdateClientTest` 覆盖小组件快照、共享写入、跨日、更新协议和校验，测试不访问真实网络。
+- 外观与小组件：`ThemeRepositoryTest` 覆盖主题名称解析和本机持久化；`WidgetPresentationTest`、`WidgetRemoteViewsTest` 覆盖小尺寸布局、状态和真实 RemoteViews；`DraftLifecycleTest` 也检查切换主题后 ViewModel、页面与草稿保留。
 
 技术版本固定为 AGP 8.7.3、Kotlin 1.9.24、KSP 1.9.24-1.0.20、Compose BOM 2024.09.03、Compose Compiler 1.5.14、Room 2.6.1。没有通知推送、相机、网页套壳或云同步；网络权限用于匿名检查和下载应用更新。
 
@@ -48,7 +49,7 @@ sdk.dir=/你的/Android/Sdk
 
 ### 小组件截图录制
 
-`WidgetScreenshotTest` 用 Robolectric/Roborazzi 渲染真实 AppWidget RemoteViews，包含浅色与深色，默认单测排除。本次实现不包含已录制图片。需要 JDK、SDK 和测试依赖后，在 `android/` 目录执行：
+`WidgetScreenshotTest` 用 Robolectric/Roborazzi 渲染真实 AppWidget RemoteViews，包含默认主题的浅色与深色，默认单测排除。测试直接将测量为 300×130dp 的组件绘制到独立 bitmap（xhdpi 下为 600×260 像素），再交给 Roborazzi；不把组件放进 Activity 窗口截整屏。本次实现不包含已录制图片。需要 JDK、SDK 和测试依赖后，在 `android/` 目录执行：
 
 ```bash
 ./gradlew :app:testDebugUnitTest --tests com.xjb.kaoyancheckin.WidgetScreenshotTest \
@@ -56,7 +57,13 @@ sdk.dir=/你的/Android/Sdk
   --no-daemon --max-workers=2
 ```
 
-输出为 `widget-light.png` 和 `widget-dark.png`。这是 JVM 预览，不替代桌面启动器和真机验收。
+输出为 `widget-light.png` 和 `widget-dark.png`，重复录制会覆盖这两个文件，不会写入真机截图。它们是 JVM 预览，不替代桌面启动器和真机验收。
+
+## 外观主题
+
+「设置 → 外观主题」可预览并选择晨读蓝、砚青、暖杏、夜读紫或竹青。未选择过主题时使用晨读蓝，沿用原有网页蓝 `#2563EB` 和原有浅、深色基础配色。每套都有浅色和深色，随系统切换；成功、警告和错误等语义色不随主题改变。
+
+主题以名称保存在本机 SharedPreferences 中，与 Room 中的打卡文档和 JSON 备份分开；遇到未知名称时回退晨读蓝。更换主题立即更新界面并刷新已添加的小组件，小组件也使用所选主题并跟随系统深浅色。
 
 ## 桌面小组件与更新
 
@@ -130,7 +137,7 @@ _recovery?: string
 - **周目标**：周一为起点，三件必做与完成标记、额外任务增删、周复盘；支持复制上周目标和复制自动周报文字。未来周只读。
 - **统计**：累计小时、分科小时、连胜、本周及前两周最低线完成率、近 8 周学习时长柱状图和计划全程热力图。数据健康按网页语义显示备份相对时间：「今天」或「X 天前」，从未备份时醒目显示「从未备份」，达到提醒周期时提示「该备份了」。
 - **节点**：网页原文的阶段路线与 18 个关键提醒；所有“预计”日期仍只是规划占位。
-- **设置**：初试日期、固定任务（停用需确认）、补签卡（显示最近 6 条已用日期）、7/14/30 天备份提醒、文件/粘贴导入预览、合并/完整恢复、恢复上一份和确认清空。清空与网页一致保留设置和固定任务，删除其余学习数据及恢复副本。
+- **设置**：五套主题预览与切换、初试日期、固定任务（停用需确认）、补签卡（显示最近 6 条已用日期）、7/14/30 天备份提醒、文件/粘贴导入预览、合并/完整恢复、恢复上一份和确认清空。清空与网页一致保留设置和固定任务，删除其余学习数据及恢复副本；主题偏好单独保存在本机。
 
 最低线为 `words` + `drill`，或使用补签；`fs` 阶段仅任意任务完成即达标，不接受补签代替。每个自然月最多两次补签，只能用于计划开始后且早于今天的未达标日期。`fs` 在网页中实际指初试后的复试准备阶段；考前 PH4 仍要求两项最低线。
 
