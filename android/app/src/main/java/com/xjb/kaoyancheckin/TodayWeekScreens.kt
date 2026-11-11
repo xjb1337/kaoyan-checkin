@@ -96,7 +96,7 @@ internal fun TodayScreen(model: CheckinViewModel) {
             val deletable = task.id.startsWith("c:") || task.id.startsWith("r:")
             TaskRow(task.label, model.plan.isDone(record, task.id), enabled, task.tag, task.id in minimumIds,
                 onDelete = if (deletable) ({ deleteTarget = task.id }) else null) {
-                model.editDay(date) { model.plan.toggle(it, task.id) }
+                model.toggleTask(date, task.id)
             }
         }
         AddField("加一条临时任务…", enabled) { name -> model.editDay(date) { day ->

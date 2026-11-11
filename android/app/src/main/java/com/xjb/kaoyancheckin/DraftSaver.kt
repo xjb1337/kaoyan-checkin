@@ -15,7 +15,7 @@ internal sealed interface DraftField {
     data class Hours(val date: String, val subject: String) : DraftField
 }
 
-// Called with a copy of the latest state while the ViewModel's write mutex is held.
+// Called with a copy of the latest state while the shared repository's write mutex is held.
 // Return null for unchanged values so merely viewing a blank date/week never creates a record.
 internal fun patchDraft(state: JSONObject, field: DraftField, value: String, today: String, now: Long): JSONObject? {
     when (field) {

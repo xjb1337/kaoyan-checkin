@@ -1,0 +1,4 @@
+<resources>
+    <color name="widget_card">#1A2130</color><color name="widget_text">#E5E7EB</color>
+    <color name="widget_sub">#B1BBCC</color><color name="widget_accent">#93C5FD</color>
+</resources>

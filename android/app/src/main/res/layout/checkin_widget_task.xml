@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_task" android:layout_width="0dp" android:layout_weight="1" android:layout_height="36dp"
+    android:gravity="center_vertical" android:textColor="@color/widget_text" android:textSize="13sp"
+    android:maxLines="1" android:ellipsize="end" android:paddingEnd="6dp" />

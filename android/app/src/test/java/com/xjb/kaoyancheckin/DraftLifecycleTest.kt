@@ -29,13 +29,15 @@ class DraftLifecycleTest {
     private lateinit var app: Application
 
     @Before fun setUp() {
+        UpdateServices.backendOverride = NoNetworkUpdateBackend
         previousClock = CheckinCore.clock
         CheckinCore.clock = Clock.fixed(Instant.parse("2026-11-10T04:00:00Z"), CheckinCore.shanghai)
         app = ApplicationProvider.getApplicationContext()
+        CheckinRepository.reset()
         app.deleteDatabase("checkin.db")
     }
 
-    @After fun tearDown() { CheckinCore.clock = previousClock }
+    @After fun tearDown() { CheckinCore.clock = previousClock; UpdateServices.backendOverride = null }
 
     @Test fun switchingTabsAndPausingPersistDraftsAlongsideOtherEdits() {
         val date = "2026-11-10"

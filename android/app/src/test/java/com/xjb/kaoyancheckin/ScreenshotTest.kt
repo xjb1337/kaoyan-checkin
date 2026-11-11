@@ -41,12 +41,14 @@ class ScreenshotTest {
 
     @Before
     fun seedDatabase() {
+        UpdateServices.backendOverride = NoNetworkUpdateBackend
         previousTimeZone = TimeZone.getDefault()
         TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"))
         previousClock = CheckinCore.clock
         CheckinCore.clock = Clock.fixed(screenshotInstant, CheckinCore.shanghai)
 
         val app = ApplicationProvider.getApplicationContext<Application>()
+        CheckinRepository.reset()
         app.deleteDatabase("checkin.db")
         check(!app.getDatabasePath("checkin.db").exists()) { "Could not reset screenshot database" }
         val raw = checkNotNull(javaClass.getResourceAsStream("/screenshot-seed.json"))
@@ -66,6 +68,7 @@ class ScreenshotTest {
 
     @After
     fun restoreTimeZone() {
+        UpdateServices.backendOverride = null
         CheckinCore.clock = previousClock
         TimeZone.setDefault(previousTimeZone)
     }
