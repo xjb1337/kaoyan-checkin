@@ -11,15 +11,33 @@ android {
         applicationId = "com.xjb.kaoyancheckin"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
+    }
+    // CI supplies all four values; without them release uses the same local debug identity.
+    val signingValues = listOf("SIGNING_STORE_FILE", "SIGNING_STORE_PASSWORD", "SIGNING_KEY_ALIAS", "SIGNING_KEY_PASSWORD")
+        .map { providers.environmentVariable(it).orNull }
+    if (signingValues.any { !it.isNullOrBlank() }) {
+        require(signingValues.all { !it.isNullOrBlank() }) { "Set all four SIGNING_* variables together" }
+        signingConfigs.create("environment") {
+            storeFile = file(signingValues[0]!!)
+            storePassword = signingValues[1]
+            keyAlias = signingValues[2]
+            keyPassword = signingValues[3]
+        }
+    }
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("environment") ?: signingConfigs.getByName("debug")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
     testOptions { unitTests.isIncludeAndroidResources = true }
@@ -40,7 +58,7 @@ tasks.withType<Test>().configureEach {
         }
         outputs.upToDateWhen { false }
     } else {
-        exclude("**/ScreenshotTest.class")
+        exclude("**/ScreenshotTest.class", "**/WidgetScreenshotTest.class")
     }
 }
 

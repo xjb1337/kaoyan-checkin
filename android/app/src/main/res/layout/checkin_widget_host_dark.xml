@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent">
+    <FrameLayout android:id="@+id/widget_light" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:visibility="@integer/widget_light_visibility" />
+    <FrameLayout android:id="@+id/widget_dark" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:visibility="@integer/widget_dark_visibility" />
+</FrameLayout>

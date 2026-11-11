@@ -2,6 +2,7 @@ package com.xjb.kaoyancheckin
 
 import android.graphics.Color as AndroidColor
 import android.os.Bundle
+import android.content.Intent
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -33,24 +34,38 @@ import com.xjb.kaoyancheckin.ui.theme.webColors
 import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
+    private var openTodaySignal by mutableIntStateOf(0)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.auto(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.auto(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT),
         )
-        setContent { WebTheme { CheckinApp() } }
+        if (CheckinWidget.isOpenToday(intent)) openTodaySignal++
+        val themeFactory = ThemeViewModel.factory(application)
+        setContent {
+            // Keep all ViewModels outside the theme provider so changing colors preserves drafts and navigation.
+            val model: CheckinViewModel = viewModel()
+            val updates: UpdateViewModel = viewModel()
+            val appearance: ThemeViewModel = viewModel(factory = themeFactory)
+            WebTheme(theme = appearance.theme) { CheckinApp(openTodaySignal, model, updates, appearance) }
+        }
+    }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (CheckinWidget.isOpenToday(intent)) openTodaySignal++
     }
 }
 
 @Composable
-private fun CheckinApp(model: CheckinViewModel = viewModel()) {
+private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: UpdateViewModel, appearance: ThemeViewModel) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle, model) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> model.resume()
+                Lifecycle.Event.ON_RESUME -> { model.resume(); model.refresh(); updates.onResume() }
                 Lifecycle.Event.ON_PAUSE -> model.flushDrafts()
                 else -> Unit
             }
@@ -58,6 +73,10 @@ private fun CheckinApp(model: CheckinViewModel = viewModel()) {
         lifecycle.addObserver(observer)
         onDispose { model.flushDrafts(); lifecycle.removeObserver(observer) }
     }
+    LaunchedEffect(openTodaySignal) {
+        if (openTodaySignal > 0) { model.page = 0; model.selected = CheckinCore.today() }
+    }
+    UpdateDialog(updates)
     LaunchedEffect(model) { model.events.collect { Toast.makeText(context, it, Toast.LENGTH_LONG).show() } }
     LaunchedEffect(lifecycle) {
         while (true) { delay(30_000); if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) model.resume() }
@@ -68,7 +87,7 @@ private fun CheckinApp(model: CheckinViewModel = viewModel()) {
         Header(model)
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
             if (!model.ready) CircularProgressIndicator(Modifier.align(Alignment.Center))
-            else key(model.page) {
+            else key(model.page, openTodaySignal) {
                 Column(Modifier.widthIn(max = 540.dp).fillMaxWidth().verticalScroll(rememberScrollState())
                     .padding(horizontal = 12.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (model.loadError.isNotEmpty()) Section("存档读取异常") {
@@ -86,7 +105,7 @@ private fun CheckinApp(model: CheckinViewModel = viewModel()) {
                         2 -> WeekScreen(model)
                         3 -> StatsScreen(model)
                         4 -> MilestonesScreen(model)
-                        else -> SettingsScreen(model)
+                        else -> SettingsScreen(model, updates, appearance)
                     }
                 }
             }

@@ -7,7 +7,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.room.Room
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,19 +14,13 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
 class CheckinViewModel(application: Application) : AndroidViewModel(application) {
-    companion object {
-        // A replacement ViewModel must not load while the old one is finishing its last writes.
-        private val mutex = Mutex()
-    }
-
-    private val database = Room.databaseBuilder(application, CheckinDatabase::class.java, "checkin.db").build()
+    private val repository = CheckinRepository.get(application)
     // Writes already requested on pause must finish even if the Activity's ViewModel is cleared.
     private val writeJob = SupervisorJob()
     private val writeScope = CoroutineScope(writeJob + Dispatchers.Main.immediate)
@@ -64,20 +57,31 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
     var exportSnapshot: String? = null
 
     init {
-        viewModelScope.launch {
-            mutex.withLock {
-                runCatching {
-                    val raw = database.document().read()
-                    recoveryRaw = raw
-                    state = if (raw == null) CheckinCore.emptyState() else withContext(Dispatchers.Default) { CheckinCore.parseBackupDocument(raw) }
-                    recoveryRaw = null
-                }.onFailure {
-                    loadError = "原始存档无法读取或格式异常。已停止覆盖，请先导出原始存档，再从备份恢复。"
-                    notify(loadError)
-                }
-                ready = true
-            }
+        // Subscribe before the initial read, so a simultaneous widget write cannot be missed.
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            repository.changes.collect { reload() }
         }
+        viewModelScope.launch { reload() }
+    }
+
+    private suspend fun reload() {
+        var rawOnFailure: String? = null
+        try {
+            state = repository.inspect { raw ->
+                rawOnFailure = raw
+                if (raw == null) CheckinCore.emptyState() else CheckinCore.parseBackupDocument(raw)
+            }
+            recoveryRaw = null
+            loadError = ""
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            recoveryRaw = rawOnFailure
+            val error = "原始存档无法读取或格式异常。已停止覆盖，请先导出原始存档，再从备份恢复。"
+            if (loadError != error) notify(error)
+            loadError = error
+        }
+        ready = true
     }
 
     fun notify(message: String) { messages.trySend(message) }
@@ -88,6 +92,7 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
         week = CheckinCore.rollDate(week, StudyPlan.monday(today), StudyPlan.monday(current))
         today = current
     }
+    fun refresh() { viewModelScope.launch { reload() } }
 
     private fun change(success: String? = null, allowRecovery: Boolean = false, noChange: String? = null,
                        block: (JSONObject) -> JSONObject?) {
@@ -95,24 +100,17 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private suspend fun commitChange(success: String? = null, allowRecovery: Boolean = false, noChange: String? = null,
-                                     block: (JSONObject) -> JSONObject?): Boolean = mutex.withLock {
-        try {
+                                     block: (JSONObject) -> JSONObject?): Boolean {
+        return try {
             check(ready) { "正在读取本机数据" }
             check(loadError.isEmpty() || allowRecovery) { loadError }
-            val source = state
-            val changed = withContext(Dispatchers.Default) { block(source.copyJson()) }
-            if (changed == null) {
-                noChange?.let(::notify)
-            } else {
-                val candidate = withContext(Dispatchers.Default) {
-                    CheckinCore.normalizeState(changed.put("upd", System.currentTimeMillis()))
-                }
-                val json = withContext(Dispatchers.Default) { candidate.toString() }
-                database.document().write(CheckinDocument(json = json))
-                state = candidate
+            val changed = repository.update(allowRecovery, block)
+            if (changed) {
                 if (allowRecovery) { recoveryRaw = null; loadError = ""; pendingRaw = null; preview = null }
+                reload()
+                runCatching { CheckinWidget.refreshAll(getApplication()) }
                 success?.let(::notify)
-            }
+            } else noChange?.let(::notify)
             true
         } catch (e: CancellationException) {
             throw e
@@ -129,12 +127,10 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
 
     fun edit(block: (JSONObject) -> Unit) = change { it.apply(block) }
     fun editDay(date: String = selected, block: (JSONObject) -> Unit) = change {
-        require(date <= CheckinCore.today()) { "未来日期只读" }
-        val record = it.obj("days").optJSONObject(date) ?: StudyPlan.day()
-        block(record)
-        record.put("u", System.currentTimeMillis())
-        it.obj("days").put(date, record)
-        it
+        editDayRecord(it, date, CheckinCore.today(), System.currentTimeMillis(), block)
+    }
+    fun toggleTask(date: String, id: String) = change {
+        toggleDayTask(it, plan, date, CheckinCore.today(), id, System.currentTimeMillis())
     }
     fun editWeek(date: String = week, block: (JSONObject) -> Unit) = change {
         require(date <= StudyPlan.monday(CheckinCore.today())) { "未来周目标只读" }
@@ -208,7 +204,6 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
 
     override fun onCleared() {
         flushDrafts()
-        writeJob.invokeOnCompletion { database.close() }
         writeJob.complete()
         super.onCleared()
     }

@@ -1,0 +1,5 @@
+<resources>
+    <!-- android:visibility in XML uses enum indices: 0=visible, 2=gone. -->
+    <integer name="widget_light_visibility">0</integer>
+    <integer name="widget_dark_visibility">2</integer>
+</resources>

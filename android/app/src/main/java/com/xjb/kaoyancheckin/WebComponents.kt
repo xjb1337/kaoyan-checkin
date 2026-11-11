@@ -134,7 +134,7 @@ internal fun TaskRow(label: String, checked: Boolean, enabled: Boolean = true, t
                 textDecoration = if (checked) TextDecoration.LineThrough else TextDecoration.None)
             if (tag != null) {
                 val (fg, bg) = when (tag) {
-                    "西综" -> c.blueTag to c.chipBlue
+                    "西综" -> c.blueTag to c.chipSubjectBlue
                     "英语" -> c.greenTag to c.chipGreen
                     "政治" -> c.orangeTag to c.chipOrange
                     "复试" -> c.redTag to c.chipRed
@@ -305,7 +305,7 @@ internal fun Banner(text: String, type: String = "warn", action: (@Composable Ro
 internal fun ProgressBar(progress: Float, modifier: Modifier = Modifier, height: androidx.compose.ui.unit.Dp = 6.dp) {
     Box(modifier.fillMaxWidth().height(height).clip(CircleShape).background(webColors.line)) {
         Box(Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f))
-            .background(Brush.horizontalGradient(listOf(Color(0xFF2563EB), Color(0xFF16A34A))), CircleShape))
+            .background(Brush.horizontalGradient(listOf(webColors.blue, Color(0xFF16A34A))), CircleShape))
     }
 }
 
