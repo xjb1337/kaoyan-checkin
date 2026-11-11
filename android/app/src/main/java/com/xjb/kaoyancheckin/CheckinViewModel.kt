@@ -68,20 +68,26 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
         today = current
     }
 
-    private fun change(success: String? = null, allowRecovery: Boolean = false, block: (JSONObject) -> JSONObject) {
+    private fun change(success: String? = null, allowRecovery: Boolean = false, noChange: String? = null,
+                       block: (JSONObject) -> JSONObject?) {
         viewModelScope.launch {
             mutex.withLock {
                 runCatching {
                     check(ready) { "正在读取本机数据" }
                     check(loadError.isEmpty() || allowRecovery) { loadError }
-                    val candidate = withContext(Dispatchers.Default) {
-                        CheckinCore.normalizeState(block(state.copyJson()).put("upd", System.currentTimeMillis()))
+                    val changed = withContext(Dispatchers.Default) { block(state.copyJson()) }
+                    if (changed == null) {
+                        noChange?.let(::notify)
+                    } else {
+                        val candidate = withContext(Dispatchers.Default) {
+                            CheckinCore.normalizeState(changed.put("upd", System.currentTimeMillis()))
+                        }
+                        val json = withContext(Dispatchers.Default) { candidate.toString() }
+                        database.document().write(CheckinDocument(json = json))
+                        state = candidate
+                        if (allowRecovery) { recoveryRaw = null; loadError = ""; pendingRaw = null; preview = null }
+                        success?.let(::notify)
                     }
-                    val json = withContext(Dispatchers.Default) { candidate.toString() }
-                    database.document().write(CheckinDocument(json = json))
-                    state = candidate
-                    if (allowRecovery) { recoveryRaw = null; loadError = ""; pendingRaw = null; preview = null }
-                    success?.let(::notify)
                 }.onFailure { notify("未保存：${it.message}") }
             }
         }
@@ -104,6 +110,16 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
         it.obj("weeks").put(date, record)
         it
     }
+
+    fun copyPreviousWeekGoals(week: String = this.week) = change(
+        success = "已复制上周目标",
+        noChange = "上周没有目标",
+    ) {
+        require(week <= StudyPlan.monday(CheckinCore.today())) { "未来周目标只读" }
+        if (plan.copyPreviousWeekGoals(it, week)) it else null
+    }
+
+    fun deleteCustomTask(date: String = selected, id: String) = editDay(date) { plan.deleteCustomTask(it, id) }
 
     fun setHours(date: String, subject: String, hours: Double) = editDay(date) { record ->
         val updated = CheckinCore.setHours(record, subject, hours)

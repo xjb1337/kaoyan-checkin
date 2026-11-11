@@ -12,8 +12,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -117,26 +119,33 @@ internal fun Chip(text: String, color: Color, background: Color, modifier: Modif
 }
 
 @Composable
-internal fun TaskRow(label: String, checked: Boolean, enabled: Boolean = true, tag: String? = null, bold: Boolean = false, onChange: () -> Unit) {
+internal fun TaskRow(label: String, checked: Boolean, enabled: Boolean = true, tag: String? = null, bold: Boolean = false,
+                     onDelete: (() -> Unit)? = null, onChange: () -> Unit) {
     val c = webColors
-    Row(Modifier.fillMaxWidth().heightIn(min = 58.dp)
-        .toggleable(checked, enabled = enabled, role = Role.Checkbox, onValueChange = { onChange() })
-        .padding(horizontal = 2.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-        RoundCheck(checked)
-        Text(label, Modifier.weight(1f), fontSize = 15.sp, lineHeight = 22.sp,
-            fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (checked) c.sub else c.text,
-            textDecoration = if (checked) TextDecoration.LineThrough else TextDecoration.None)
-        if (tag != null) {
-            val (fg, bg) = when (tag) {
-                "西综" -> c.blueTag to c.chipBlue
-                "英语" -> c.greenTag to c.chipGreen
-                "政治" -> c.orangeTag to c.chipOrange
-                "复试" -> c.redTag to c.chipRed
-                else -> c.purpleTag to c.chipPurple
+    Row(Modifier.fillMaxWidth().heightIn(min = 58.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.weight(1f).heightIn(min = 58.dp)
+            .toggleable(checked, enabled = enabled, role = Role.Checkbox, onValueChange = { onChange() })
+            .padding(horizontal = 2.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+            RoundCheck(checked)
+            Text(label, Modifier.weight(1f), fontSize = 15.sp, lineHeight = 22.sp,
+                fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (checked) c.sub else c.text,
+                textDecoration = if (checked) TextDecoration.LineThrough else TextDecoration.None)
+            if (tag != null) {
+                val (fg, bg) = when (tag) {
+                    "西综" -> c.blueTag to c.chipBlue
+                    "英语" -> c.greenTag to c.chipGreen
+                    "政治" -> c.orangeTag to c.chipOrange
+                    "复试" -> c.redTag to c.chipRed
+                    else -> c.purpleTag to c.chipPurple
+                }
+                Chip(tag, fg, bg)
             }
-            Chip(tag, fg, bg)
+        }
+        if (onDelete != null) {
+            WebButton("✕", onDelete, Modifier.padding(start = 4.dp, end = 2.dp), enabled = enabled,
+                accessibilityLabel = "删除$label")
         }
     }
     Divider()
@@ -197,17 +206,30 @@ internal fun AddField(placeholder: String, enabled: Boolean = true, button: Stri
 // Web .daynav: date picker is native while keeping the web row's appearance.
 @Composable
 internal fun DateNav(date: String, previous: () -> Unit, next: () -> Unit, current: () -> Unit,
-    currentLabel: String, isCurrent: Boolean, datePicker: Boolean, onDate: (String) -> Unit = {}) {
+    currentLabel: String, isCurrent: Boolean, datePicker: Boolean, canGoNext: Boolean = true, maxDate: String? = null,
+    onDate: (String) -> Unit = {}) {
     val context = LocalContext.current
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
         WebButton("‹", previous, Modifier.width(44.dp))
         if (datePicker) {
             val value = LocalDate.parse(date)
+            val limit = maxDate?.let { LocalDate.parse(it) }
+            val pickerDate = if (limit != null && value > limit) limit else value
             Row(Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(10.dp))
                 .background(webColors.card).border(1.dp, webColors.line, RoundedCornerShape(10.dp))
                 .clickable {
-                    DatePickerDialog(context, { _, year, month, day -> onDate(LocalDate.of(year, month + 1, day).toString()) },
-                        value.year, value.monthValue - 1, value.dayOfMonth).show()
+                    val dialog = DatePickerDialog(context, { _, year, month, day ->
+                        val picked = LocalDate.of(year, month + 1, day)
+                        if (limit == null || picked <= limit) onDate(picked.toString())
+                    }, pickerDate.year, pickerDate.monthValue - 1, pickerDate.dayOfMonth)
+                    if (limit != null) {
+                        val maximum = java.util.Calendar.getInstance().apply {
+                            clear()
+                            set(limit.year, limit.monthValue - 1, limit.dayOfMonth)
+                        }
+                        dialog.datePicker.maxDate = maximum.timeInMillis
+                    }
+                    dialog.show()
                 }.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("${shortDate(date)}/${date.take(4)}", Modifier.weight(1f), textAlign = TextAlign.Center,
                     color = webColors.text, fontSize = 14.sp, fontWeight = FontWeight.Bold)
@@ -217,10 +239,16 @@ internal fun DateNav(date: String, previous: () -> Unit, next: () -> Unit, curre
             Text("${shortDate(date)} ~ ${shortDate(StudyPlan.addDays(date, 6))}", Modifier.widthIn(min = 130.dp),
                 textAlign = TextAlign.Center, color = webColors.text, fontSize = 15.sp, maxLines = 1)
         }
-        // Future navigation remains available as in the existing Android app.
-        WebButton("›", next, Modifier.width(44.dp))
+        WebButton("›", { if (canGoNext) next() }, Modifier.width(44.dp), enabled = canGoNext)
         WebButton(currentLabel, current, enabled = !isCurrent)
     }
+}
+
+@Composable
+internal fun ConfirmDialog(title: String, message: String, dismiss: () -> Unit, confirm: () -> Unit) {
+    AlertDialog(onDismissRequest = dismiss, title = { Text(title) }, text = { Text(message) },
+        confirmButton = { TextButton(onClick = { confirm(); dismiss() }) { Text("确认") } },
+        dismissButton = { TextButton(onClick = dismiss) { Text("取消") } })
 }
 
 @Composable

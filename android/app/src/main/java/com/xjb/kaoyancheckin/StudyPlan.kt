@@ -59,6 +59,26 @@ class StudyPlan(val data: JSONObject) {
         } else record.obj("t").put(id, !record.obj("t").optBoolean(id))
     }
 
+    fun deleteCustomTask(record: JSONObject, id: String) {
+        require(id.startsWith("c:") || id.startsWith("r:")) { "只能删除自定义任务" }
+        val name = id.substring(2)
+        val remaining = JSONArray()
+        record.arr("c").values().filterIsInstance<JSONObject>()
+            .filter { it.optString("n") != name }
+            .forEach { remaining.put(it) }
+        record.put("c", remaining)
+    }
+
+    fun copyPreviousWeekGoals(state: JSONObject, week: String, now: Long = System.currentTimeMillis()): Boolean {
+        val previous = state.obj("weeks").optJSONObject(addDays(week, -7)) ?: return false
+        val target = state.obj("weeks").optJSONObject(week) ?: week()
+        target.put("must", JSONArray(previous.arr("must").toString()))
+            .put("md", JSONArray().put(false).put(false).put(false))
+            .put("u", now)
+        state.obj("weeks").put(week, target)
+        return true
+    }
+
     fun anyDone(record: JSONObject?): Boolean = record != null &&
         (record.obj("t").namesList().any { record.obj("t").optBoolean(it) } || record.arr("c").values().any { (it as JSONObject).optBoolean("d") })
 
@@ -88,6 +108,8 @@ class StudyPlan(val data: JSONObject) {
     companion object {
         fun addDays(date: String, days: Long): String = LocalDate.parse(date).plusDays(days).toString()
         fun monday(date: String): String = LocalDate.parse(date).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).toString()
+        fun nextWithinLimit(date: String, limit: String, days: Long): String? =
+            addDays(date, days).takeIf { it <= limit }
         fun day(): JSONObject = JSONObject("""{"t":{},"c":[],"h":0,"sh":{},"rw":{"g":"","s":"","n":""},"u":0}""")
         fun week(): JSONObject = JSONObject("""{"must":["","",""],"md":[false,false,false],"ex":[],"review":"","u":0}""")
     }
