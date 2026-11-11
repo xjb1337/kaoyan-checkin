@@ -15,9 +15,17 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -107,13 +115,19 @@ internal fun ProgressScreen(model: CheckinViewModel) {
                     Text("${score.getDouble("tot")}", color = if (score.getDouble("tot") >= 200) c.green else c.red, fontWeight = FontWeight.Bold)
                     WebButton("删除", { model.edit { state -> state.put("scores", JSONArray(state.arr("scores").values().filter { (it as JSONObject).getString("id") != score.getString("id") })) } }, enabled = enabled)
                 }
-                if (score.obj("p").length() > 0) Tip(score.obj("p").namesList().joinToString(" / ") { "$it ${score.obj("p").get(it)}" })
+                val partText = ScoreEntry.describe(score.obj("p"))
+                if (partText.isNotEmpty()) Tip(partText)
                 Divider()
             }
         }
         var date by rememberSaveable { mutableStateOf(model.today) }
         var name by rememberSaveable { mutableStateOf("") }
         var total by rememberSaveable { mutableStateOf("") }
+        var phys by rememberSaveable { mutableStateOf("") }
+        var bioc by rememberSaveable { mutableStateOf("") }
+        var path by rememberSaveable { mutableStateOf("") }
+        var med by rememberSaveable { mutableStateOf("") }
+        var surg by rememberSaveable { mutableStateOf("") }
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Column(Modifier.weight(1f)) {
@@ -128,13 +142,48 @@ internal fun ProgressScreen(model: CheckinViewModel) {
         Spacer(Modifier.height(8.dp))
         Text("总分（300 分制；参考线不等于录取线）", color = c.sub, fontSize = 11.5.sp)
         WebInput(total, { total = it }, "如 215", Modifier.fillMaxWidth(), enabled, numeric = true)
+        Spacer(Modifier.height(8.dp))
+        Text("选填：各科得分（合计不能超过总分）", color = c.sub, fontSize = 11.5.sp)
+        Spacer(Modifier.height(4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ScorePartField("生理", phys, { phys = it }, enabled, Modifier.weight(1f))
+            ScorePartField("生化", bioc, { bioc = it }, enabled, Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ScorePartField("病理", path, { path = it }, enabled, Modifier.weight(1f))
+            ScorePartField("内科", med, { med = it }, enabled, Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ScorePartField("外科", surg, { surg = it }, enabled, Modifier.weight(1f))
+            Spacer(Modifier.weight(1f))
+        }
         Spacer(Modifier.height(10.dp))
         WebButton("保存这次成绩", {
             val score = total.toDoubleOrNull()
             if (!CheckinCore.validDate(date) || date > model.today) model.notify("请填写今天或过去的有效考试日期")
             else if (name.length > 200) model.notify("卷子名称请控制在 200 字以内")
             else if (score == null || !score.isFinite() || score !in 0.0..300.0) model.notify("请填 0-300 的总分")
-            else { model.edit { it.arr("scores").put(JSONObject().put("id", UUID.randomUUID().toString()).put("d", date).put("n", name).put("tot", score).put("p", JSONObject())) }; total = "" }
+            else {
+                val parts = try {
+                    ScoreEntry.normalizeParts(mapOf(
+                        "phys" to phys, "bioc" to bioc, "path" to path, "med" to med, "surg" to surg,
+                    ), score)
+                } catch (e: IllegalArgumentException) {
+                    model.notify(e.message ?: "分科得分格式错误")
+                    null
+                }
+                if (parts != null) {
+                    model.edit { it.arr("scores").put(JSONObject().put("id", UUID.randomUUID().toString()).put("d", date).put("n", name).put("tot", score).put("p", parts)) }
+                    total = ""
+                    phys = ""
+                    bioc = ""
+                    path = ""
+                    med = ""
+                    surg = ""
+                }
+            }
         }, Modifier.fillMaxWidth(), enabled, big = true, primary = true)
     }
 }
@@ -142,14 +191,47 @@ internal fun ProgressScreen(model: CheckinViewModel) {
 @Composable
 private fun ScoreChart(scores: List<JSONObject>) {
     val c = webColors
-    Canvas(Modifier.fillMaxWidth().height(110.dp).padding(vertical = 8.dp)) {
-        val points = scores.mapIndexed { i, score ->
-            val x = if (scores.size == 1) size.width / 2 else size.width * i / (scores.size - 1)
-            androidx.compose.ui.geometry.Offset(x, size.height * (1f - ((score.optDouble("tot") - 100) / 200).toFloat().coerceIn(0f, 1f)))
+    val textMeasurer = rememberTextMeasurer()
+    val tickStyle = TextStyle(color = c.sub, fontSize = 9.sp)
+    val referenceText = "参考线 ${ScoreChartMath.REFERENCE_SCORE.toInt()}"
+    val referenceStyle = TextStyle(color = c.orange, fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold)
+    val ticks = ScoreChartMath.axisScores.map { it to textMeasurer.measure("$it", style = tickStyle) }
+    val referenceLabel = textMeasurer.measure(referenceText, style = referenceStyle)
+    Canvas(Modifier.fillMaxWidth().aspectRatio(ScoreChartMath.VIEW_WIDTH / ScoreChartMath.VIEW_HEIGHT)) {
+        val left = size.width * ScoreChartMath.PLOT_LEFT / ScoreChartMath.VIEW_WIDTH
+        val right = size.width - size.width * ScoreChartMath.PLOT_RIGHT / ScoreChartMath.VIEW_WIDTH
+        ticks.forEach { (value, label) ->
+            val y = ScoreChartMath.plotY(value.toDouble(), size.height)
+            drawLine(c.line, Offset(left, y), Offset(right, y), 1.dp.toPx())
+            drawText(label, topLeft = Offset(left - label.size.width - 3.dp.toPx(), y - label.size.height / 2f))
         }
-        drawLine(c.amber, androidx.compose.ui.geometry.Offset(0f, size.height / 2), androidx.compose.ui.geometry.Offset(size.width, size.height / 2), 1.dp.toPx())
-        points.zipWithNext().forEach { (a, b) -> drawLine(c.blue, a, b, 2.dp.toPx()) }
-        points.forEach { drawCircle(c.blue, 3.dp.toPx(), it) }
+        val referenceY = ScoreChartMath.plotY(ScoreChartMath.REFERENCE_SCORE, size.height)
+        drawLine(c.orange, Offset(left, referenceY), Offset(right, referenceY), 1.5.dp.toPx(),
+            pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 4.dp.toPx())))
+        val labelPadX = 5.dp.toPx()
+        val labelPadY = 1.dp.toPx()
+        val labelTop = 2.dp.toPx()
+        drawRoundRect(c.card, topLeft = Offset(left, labelTop),
+            size = Size(referenceLabel.size.width + labelPadX * 2, referenceLabel.size.height + labelPadY * 2),
+            cornerRadius = CornerRadius(4.dp.toPx()))
+        drawText(referenceLabel, topLeft = Offset(left + labelPadX, labelTop + labelPadY))
+
+        val points = ScoreChartMath.points(scores.map { it.optDouble("tot") }, size.width, size.height)
+        points.zipWithNext().forEach { (a, b) ->
+            drawLine(c.blue, Offset(a.x, a.y), Offset(b.x, b.y), 2.dp.toPx(), cap = StrokeCap.Round)
+        }
+        points.forEach { point ->
+            drawCircle(if (ScoreChartMath.meetsReference(point.score)) c.green else c.red,
+                3.5.dp.toPx(), Offset(point.x, point.y))
+        }
+    }
+}
+
+@Composable
+private fun ScorePartField(label: String, value: String, onValueChange: (String) -> Unit, enabled: Boolean, modifier: Modifier) {
+    Column(modifier) {
+        Text(label, color = webColors.sub, fontSize = 11.5.sp)
+        WebInput(value, onValueChange, "选填", Modifier.fillMaxWidth(), enabled, numeric = true)
     }
 }
 
