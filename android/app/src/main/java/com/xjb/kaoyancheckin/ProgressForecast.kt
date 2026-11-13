@@ -18,6 +18,15 @@ internal const val MIN_CHAPTERS_FOR_FORECAST = 2
 /** ...and at least this many days since the first chapter was checked. */
 internal const val MIN_CHAPTER_SPAN_DAYS = 7L
 
+/** Recent chapter pace uses this many calendar days, ending today. */
+internal const val RECENT_CHAPTER_WINDOW_DAYS = 28L
+
+/** A recent chapter pace needs at least this many checked chapters with dates. */
+internal const val MIN_DATED_CHAPTERS_FOR_RECENT_FORECAST = 3
+
+/** ...and at least this many days between the earliest and latest chapter date. */
+internal const val MIN_DATED_CHAPTER_SPAN_DAYS = 7L
+
 /** A study-hour forecast needs at least this many days with recorded hours. */
 internal const val MIN_HOURS_ACTIVE_DAYS = 5
 
@@ -107,8 +116,11 @@ internal sealed interface SubjectForecast {
         val weeklyNeeded: Double?,
         val planOverdue: Boolean,
         val planEndsToday: Boolean,
+        val pace: SubjectPace = SubjectPace.AVERAGE,
     ) : SubjectForecast
 }
+
+internal enum class SubjectPace { RECENT, AVERAGE }
 
 internal enum class SubjectForecastGap {
     NO_CHAPTERS,
@@ -239,8 +251,10 @@ internal fun forecastWords(
 }
 
 /**
- * Chapter pace is calculated from the first checked chapter because the data stores no per-chapter
- * dates. Elapsed time includes the first day; today counts once more if another chapter is done.
+ * Uses per-chapter dates when at least [MIN_DATED_CHAPTERS_FOR_RECENT_FORECAST] checked chapters
+ * span [MIN_DATED_CHAPTER_SPAN_DAYS] days. The recent pace counts chapters checked in the last
+ * [RECENT_CHAPTER_WINDOW_DAYS] days. Otherwise it falls back to the average since the first check.
+ * Elapsed time includes the first day.
  */
 internal fun forecastSubject(subject: JSONObject, state: JSONObject, today: LocalDate): SubjectForecast {
     val key = subject.getString("k")
@@ -268,6 +282,38 @@ internal fun forecastSubject(subject: JSONObject, state: JSONObject, today: Loca
     if (done <= 0) {
         return SubjectForecast.Insufficient(subjectName, done, total, SubjectForecastGap.NO_CHAPTERS, null, null)
     }
+
+    val datedChapters = datedCheckedChapters(state, key, flags, total, today)
+    if (datedChapters.size >= MIN_DATED_CHAPTERS_FOR_RECENT_FORECAST) {
+        val earliest = datedChapters.minOf { it.second }
+        val latest = datedChapters.maxOf { it.second }
+        if (ChronoUnit.DAYS.between(earliest, latest) >= MIN_DATED_CHAPTER_SPAN_DAYS) {
+            val windowStart = maxOf(today.minusDays(RECENT_CHAPTER_WINDOW_DAYS - 1), earliest)
+            val windowDays = ChronoUnit.DAYS.between(windowStart, today) + 1
+            val recentDone = datedChapters.count { !it.second.isBefore(windowStart) }
+            if (recentDone > 0 && windowDays > 0) {
+                val remaining = total - done
+                val daysNeeded = (remaining.toLong() * windowDays + recentDone - 1) / recentDone
+                val estimatedDate = today.plusDays(daysNeeded)
+                return SubjectForecast.Estimated(
+                    subjectName = subjectName,
+                    done = done,
+                    total = total,
+                    firstDate = earliest,
+                    elapsedDays = ChronoUnit.DAYS.between(earliest, today) + 1,
+                    estimatedDate = estimatedDate,
+                    planEnd = planEnd,
+                    planDeltaDays = ChronoUnit.DAYS.between(planEnd, estimatedDate),
+                    remaining = remaining,
+                    weeklyNeeded = weeklyNeeded(remaining, today, planEnd),
+                    planOverdue = today > planEnd,
+                    planEndsToday = today == planEnd,
+                    pace = SubjectPace.RECENT,
+                )
+            }
+        }
+    }
+
     val firstDate = parseDate(state.obj("cf").optString(key))
         ?: return SubjectForecast.Insufficient(
             subjectName, done, total, SubjectForecastGap.MISSING_FIRST_DATE, null, null,
@@ -287,8 +333,6 @@ internal fun forecastSubject(subject: JSONObject, state: JSONObject, today: Loca
     val remaining = total - done
     val daysNeeded = (remaining.toLong() * elapsedDays + done - 1) / done
     val estimatedDate = today.plusDays(daysNeeded)
-    val remainingToEnd = ChronoUnit.DAYS.between(today, planEnd)
-    val weeklyNeeded = if (remainingToEnd > 0) remaining * 7.0 / remainingToEnd else null
     return SubjectForecast.Estimated(
         subjectName = subjectName,
         done = done,
@@ -299,10 +343,31 @@ internal fun forecastSubject(subject: JSONObject, state: JSONObject, today: Loca
         planEnd = planEnd,
         planDeltaDays = ChronoUnit.DAYS.between(planEnd, estimatedDate),
         remaining = remaining,
-        weeklyNeeded = weeklyNeeded,
-        planOverdue = remainingToEnd < 0,
-        planEndsToday = remainingToEnd == 0L,
+        weeklyNeeded = weeklyNeeded(remaining, today, planEnd),
+        planOverdue = today > planEnd,
+        planEndsToday = today == planEnd,
+        pace = SubjectPace.AVERAGE,
     )
+}
+
+private fun datedCheckedChapters(
+    state: JSONObject,
+    key: String,
+    flags: org.json.JSONArray,
+    total: Int,
+    today: LocalDate,
+): List<Pair<Int, LocalDate>> {
+    val dates = state.obj("cd").optJSONObject(key) ?: return emptyList()
+    return dates.namesList().mapNotNull { rawIndex ->
+        val index = rawIndex.toIntOrNull() ?: return@mapNotNull null
+        val date = parseDate(dates.optString(rawIndex)) ?: return@mapNotNull null
+        if (index !in 0 until total || !flags.optBoolean(index) || date > today) null else index to date
+    }
+}
+
+private fun weeklyNeeded(remaining: Int, today: LocalDate, planEnd: LocalDate): Double? {
+    val remainingToEnd = ChronoUnit.DAYS.between(today, planEnd)
+    return if (remainingToEnd > 0) remaining * 7.0 / remainingToEnd else null
 }
 
 /**
@@ -395,7 +460,9 @@ internal fun formatSubjectForecast(forecast: SubjectForecast): String = when (fo
             "${MIN_CHAPTER_SPAN_DAYS} 天后再预测"
     }
     is SubjectForecast.Estimated -> buildString {
-        append("${forecast.subjectName}：约 ${monthDay(forecast.estimatedDate)} 学完，")
+        append("${forecast.subjectName}：")
+        if (forecast.pace == SubjectPace.RECENT) append("按近 $RECENT_CHAPTER_WINDOW_DAYS 天速度，")
+        append("约 ${monthDay(forecast.estimatedDate)} 学完，")
         append(estimateComparison(forecast.planDeltaDays))
         when {
             forecast.planOverdue -> append("；计划已于 ${monthDay(forecast.planEnd)} 截止，已超期")
@@ -437,7 +504,8 @@ internal fun forecastSummary(plan: StudyPlan, state: JSONObject, today: LocalDat
     currentSubjects.forEach { subject ->
         when (val forecast = forecastSubject(subject, state, today)) {
             is SubjectForecast.Estimated ->
-                parts.add("${forecast.subjectName}约 ${monthDay(forecast.estimatedDate)}学完，${earlyOrLate(forecast.planDeltaDays)}")
+                parts.add("${forecast.subjectName}${if (forecast.pace == SubjectPace.RECENT) "按近 $RECENT_CHAPTER_WINDOW_DAYS 天速度" else ""}" +
+                    "约 ${monthDay(forecast.estimatedDate)}学完，${earlyOrLate(forecast.planDeltaDays)}")
             is SubjectForecast.Completed -> parts.add("${forecast.subjectName}已完成")
             else -> Unit
         }

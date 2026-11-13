@@ -66,6 +66,7 @@ class ChapterCompatibilityTest {
     @Test fun oldLocalChapterFlagsStillMapToTheSameNamesAndCounts() {
         val localState = CheckinCore.parseBackupDocument(oldWebBackup)
         assertLegacyProgress(localState)
+        assertEquals(0, localState.obj("cd").length())
     }
 
     @Test fun webJsonImportPreservesOldChapterNamesAndCountsForMergeAndReplace() {
@@ -78,6 +79,7 @@ class ChapterCompatibilityTest {
             assertEquals(2, imported.getInt("schemaVersion"))
             assertTrue(JSONObject(oldWebBackup).getJSONObject("ch").similar(imported.obj("ch")))
             assertLegacyProgress(imported)
+            assertEquals(0, imported.obj("cd").length())
         }
     }
 }

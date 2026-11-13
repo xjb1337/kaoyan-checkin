@@ -6,6 +6,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Clock
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.math.floor
@@ -44,8 +45,24 @@ object CheckinCore {
     }
     private fun fallback(value: Any?, default: Any): Any = if (truthy(value)) value!! else default
     private fun round(value: Double) = floor(value * 100 + 0.5) / 100
+    private fun sameJson(a: Any?, b: Any?): Boolean = when {
+        a is JSONObject && b is JSONObject -> a.namesList().size == b.namesList().size &&
+            a.namesList().all { b.has(it) && sameJson(a.opt(it), b.opt(it)) }
+        a is JSONArray && b is JSONArray -> a.length() == b.length() &&
+            (0 until a.length()).all { sameJson(a.opt(it), b.opt(it)) }
+        a == null || a === JSONObject.NULL -> b == null || b === JSONObject.NULL
+        b == null || b === JSONObject.NULL -> false
+        else -> a == b
+    }
 
     fun today(): String = LocalDate.now(clock).toString()
+    fun todayRefreshDelayMillis(): Long = millisUntilNextShanghaiMidnight().coerceIn(1_000L, 60_000L)
+
+    fun millisUntilNextShanghaiMidnight(): Long {
+        val now = Instant.now(clock)
+        val next = now.atZone(shanghai).toLocalDate().plusDays(1).atStartOfDay(shanghai).toInstant()
+        return (next.toEpochMilli() - now.toEpochMilli()).coerceAtLeast(1L)
+    }
     fun validDate(value: Any?): Boolean {
         if (value !is String || !Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}").matches(value)) return false
         return runCatching { LocalDate.parse(value).toString() == value }.getOrDefault(false)
@@ -139,6 +156,7 @@ object CheckinCore {
         val chapters = nullish(raw.opt("ch"), JSONObject())
         val firstChapters = nullish(raw.opt("cf"), JSONObject())
         val completedChapters = nullish(raw.opt("ce"), JSONObject())
+        val chapterDates = nullish(raw.opt("cd"), JSONObject())
         val makeup = nullish(raw.opt("mk"), JSONArray())
         val settings = nullish(raw.opt("settings"), JSONObject())
         if (recur !is JSONArray || !recur.values().all { text(it) }) fail("固定任务格式错误")
@@ -149,6 +167,12 @@ object CheckinCore {
             }) fail("章节格式错误")
         if (listOf(firstChapters, completedChapters).any { dates ->
                 dates !is JSONObject || !dates.namesList().all { validDate(dates.opt(it)) }
+            }) fail("章节日期格式错误")
+        if (chapterDates !is JSONObject || !chapterDates.namesList().all { key ->
+                val dates = chapterDates.opt(key)
+                dates is JSONObject && dates.namesList().all { index ->
+                    Regex("[0-9]+").matches(index) && validDate(dates.opt(index))
+                }
             }) fail("章节日期格式错误")
         if (makeup !is JSONArray || !makeup.values().all(::validDate)) fail("补签日期格式错误")
         if (settings !is JSONObject || !validDate(fallback(settings.opt("exam"), "2027-12-25"))) fail("初试日期格式错误")
@@ -171,10 +195,24 @@ object CheckinCore {
             if (source.has("w")) record.put("w", JSONObject().put("n", source.obj("w").optInt("n", 0)).put("r", source.obj("w").optInt("r", 0)))
             days.put(date, normalizeHours(record))
         }
+        val normalizedChapterDates = JSONObject()
+        chapterDates.namesList().forEach { key ->
+            val flags = chapters.optJSONArray(key)
+            val dates = chapterDates.getJSONObject(key)
+            val kept = JSONObject()
+            dates.namesList().forEach { rawIndex ->
+                val index = rawIndex.toIntOrNull()
+                if (index != null && flags != null && index in 0 until flags.length() && flags.optBoolean(index)) {
+                    kept.put(rawIndex, dates.getString(rawIndex))
+                }
+            }
+            if (kept.length() > 0) normalizedChapterDates.put(key, kept)
+        }
         val result = JSONObject().put("schemaVersion", 2).put("days", days).put("weeks", JSONObject(weeks.toString()))
             .put("recur", JSONArray(recur.toString())).put("scores", JSONArray(scores.toString()))
             .put("ch", chapters.copyJson()).put("cf", (firstChapters as JSONObject).copyJson())
-            .put("ce", (completedChapters as JSONObject).copyJson()).put("mk", JSONArray(makeup.toString()))
+            .put("ce", (completedChapters as JSONObject).copyJson()).put("cd", normalizedChapterDates)
+            .put("mk", JSONArray(makeup.toString()))
             .put("settings", JSONObject().put("exam", fallback(settings.opt("exam"), "2027-12-25"))
                 .put("backupDays", fallback(settings.opt("backupDays"), 7))
                 .put("wordBase", settings.optInt("wordBase", DEFAULT_WORD_BASE))
@@ -215,7 +253,11 @@ object CheckinCore {
         (!truthy(state.opt("bk")) || (now - state.optDouble("bk", 0.0)) / 86_400_000 >= state.obj("settings").optInt("backupDays", 7))
 
     fun rollDate(selected: String, previous: String, current: String): String = if (selected == previous) current else selected
-    fun backupJSON(state: JSONObject): String = state.copyJson().apply { remove("_recovery"); remove("_undo") }.toString()
+    fun backupJSON(state: JSONObject): String = state.copyJson().apply {
+        remove("_recovery")
+        remove("_undo")
+        if (optJSONObject("cd") == null) put("cd", JSONObject())
+    }.toString()
 
     fun mergeState(current: JSONObject, incoming: JSONObject): JSONObject {
         val out = current.copyJson()
@@ -232,11 +274,24 @@ object CheckinCore {
         }
         if (incoming.optDouble("upd", 0.0) > current.optDouble("upd", 0.0)) {
             listOf("recur", "scores", "ch", "cf", "ce", "mk").forEach { field ->
-                if (incoming.get(field).toString() != current.get(field).toString()) {
-                    val value = incoming.get(field)
-                    out.put(field, if (value is JSONObject) value.copyJson() else JSONArray(value.toString()))
+                val value = incoming.opt(field)
+                val previous = current.opt(field)
+                if (value?.toString() != previous?.toString()) {
+                    out.put(field, if (value is JSONObject) value.copyJson() else JSONArray(value?.toString() ?: "[]"))
                     changed = true
                 }
+            }
+            // Chapter dates belong to the chapter flags: both come from the newer snapshot together.
+            val incomingDates = incoming.optJSONObject("cd") ?: JSONObject()
+            val currentDates = current.optJSONObject("cd") ?: JSONObject()
+            val datesChanged = !sameJson(incomingDates, currentDates)
+            val chaptersChanged = !sameJson(incoming.optJSONObject("ch"), current.optJSONObject("ch"))
+            if (datesChanged || chaptersChanged) {
+                out.put("ch", incoming.optJSONObject("ch")?.copyJson() ?: JSONObject())
+                out.put("cd", incomingDates.copyJson())
+                changed = true
+            } else if (!out.has("cd")) {
+                out.put("cd", JSONObject())
             }
             val settings = current.obj("settings").copyJson()
             incoming.obj("settings").namesList().forEach { settings.put(it, incoming.obj("settings").get(it)) }

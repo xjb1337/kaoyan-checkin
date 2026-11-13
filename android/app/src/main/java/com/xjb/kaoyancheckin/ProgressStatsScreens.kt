@@ -61,7 +61,8 @@ internal fun ProgressScreen(model: CheckinViewModel) {
         }
         ForecastRow(formatHoursForecast(hoursForecast), hoursForecast.tone, hoursForecastStatus(hoursForecast))
         Spacer(Modifier.height(8.dp))
-        Tip("按近 ${FORECAST_WINDOW_DAYS} 天实际速度推算，章节按首次勾选以来的平均速度；记录太少时不预测")
+        Tip("按近 ${FORECAST_WINDOW_DAYS} 天实际速度推算；章节有逐章日期时按近 " +
+            "$RECENT_CHAPTER_WINDOW_DAYS 天速度，否则按首次勾选以来的平均速度；记录太少时不预测")
     }
     Section("单词第一轮") {
         Text("累计已背 ${words.total} / ${words.goal}", fontWeight = FontWeight.SemiBold, color = c.text)
@@ -120,7 +121,7 @@ internal fun ProgressScreen(model: CheckinViewModel) {
             if (expanded) chapters.values().forEachIndexed { index, chapter ->
                 val checked = flags.optBoolean(index)
                 Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable(enabled = enabled) {
-                    model.edit { state -> toggleChapter(state, subject, index, CheckinCore.today()) }
+                    model.toggleChapter(subject, index)
                 }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                     Text("${index + 1}", Modifier.size(22.dp).clip(RoundedCornerShape(7.dp)).background(if (checked) c.blue else c.line).wrapContentSize(),
                         textAlign = TextAlign.Center, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (checked) Color.White else c.sub)

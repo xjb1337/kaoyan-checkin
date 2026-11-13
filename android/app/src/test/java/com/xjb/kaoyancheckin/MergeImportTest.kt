@@ -121,4 +121,73 @@ class MergeImportTest {
         assertThrows(IllegalArgumentException::class.java) { CheckinCore.importBackup(current, """{"days":{},"schemaVersion":99}""") }
         assertEquals(before, current.toString())
     }
+
+    private fun chapterState(time: Long, flags: List<Boolean>, dates: Map<String, String>): JSONObject =
+        CheckinCore.emptyState().apply {
+            put("upd", time)
+            obj("ch").put("phys", JSONArray(flags))
+            if (dates.isNotEmpty()) obj("cd").put("phys", JSONObject(dates))
+        }
+
+    @Test fun newerChapterSnapshotMovesFlagsAndDatesTogether() {
+        val current = chapterState(100, listOf(true), mapOf("0" to "2026-11-01")).put("cf", JSONObject().put("phys", "2026-11-01"))
+        val incoming = chapterState(
+            200,
+            listOf(true, true),
+            mapOf("0" to "2026-11-02", "1" to "2026-11-09"),
+        ).put("cf", JSONObject().put("phys", "2026-11-02"))
+
+        val out = CheckinCore.mergeState(current, incoming)
+
+        assertEquals(2, out.obj("ch").arr("phys").length())
+        assertTrue(out.obj("ch").arr("phys").getBoolean(1))
+        assertEquals(mapOf("0" to "2026-11-02", "1" to "2026-11-09"), out.obj("cd").obj("phys").let { dates ->
+            dates.namesList().associateWith { dates.getString(it) }
+        })
+        assertEquals("2026-11-02", out.obj("cf").getString("phys"))
+    }
+
+    @Test fun olderChapterSnapshotKeepsCurrentFlagsAndDates() {
+        val current = chapterState(
+            200,
+            listOf(true, true),
+            mapOf("0" to "2026-11-02", "1" to "2026-11-09"),
+        )
+        val incoming = chapterState(100, listOf(true), mapOf("0" to "2026-11-01"))
+
+        val out = CheckinCore.mergeState(current, incoming)
+
+        assertEquals(2, out.obj("ch").arr("phys").length())
+        assertEquals("2026-11-02", out.obj("cd").obj("phys").getString("0"))
+        assertEquals("2026-11-09", out.obj("cd").obj("phys").getString("1"))
+    }
+
+    @Test fun newerSnapshotWithoutDatesClearsChapterDates() {
+        val current = chapterState(
+            100,
+            listOf(true, true),
+            mapOf("0" to "2026-11-02", "1" to "2026-11-09"),
+        )
+        val incoming = JSONObject()
+            .put("days", JSONObject())
+            .put("upd", 200)
+            .put("ch", JSONObject().put("phys", JSONArray().put(true).put(true)))
+        assertFalse(incoming.has("cd"))
+
+        val out = CheckinCore.mergeState(current, incoming)
+
+        assertEquals(2, out.obj("ch").arr("phys").length())
+        assertTrue(out.has("cd"))
+        assertEquals(0, out.obj("cd").length())
+    }
+
+    @Test fun newerDatesUpdateEvenWhenChapterFlagsMatch() {
+        val current = chapterState(100, listOf(true, true), mapOf("0" to "2026-11-01", "1" to "2026-11-02"))
+        val incoming = chapterState(200, listOf(true, true), mapOf("0" to "2026-11-03", "1" to "2026-11-09"))
+
+        val out = CheckinCore.mergeState(current, incoming)
+
+        assertEquals("2026-11-03", out.obj("cd").obj("phys").getString("0"))
+        assertEquals("2026-11-09", out.obj("cd").obj("phys").getString("1"))
+    }
 }

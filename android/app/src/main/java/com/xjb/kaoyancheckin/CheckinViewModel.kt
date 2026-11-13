@@ -19,13 +19,37 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
+internal data class RolledToday(val today: String, val selected: String, val week: String)
+
+internal fun rollToday(currentToday: String, selected: String, week: String, newToday: String): RolledToday =
+    RolledToday(
+        today = newToday,
+        selected = CheckinCore.rollDate(selected, currentToday, newToday),
+        week = CheckinCore.rollDate(week, StudyPlan.monday(currentToday), StudyPlan.monday(newToday)),
+    )
+
+/** Keep an explicitly edited historical date, but move a stale "today" write to the rolled day. */
+internal fun resolveWriteDate(
+    date: String?,
+    previousToday: String,
+    currentToday: String,
+    selectedAfterRoll: String,
+    selectedWasToday: Boolean,
+): String = when {
+    date == null -> selectedAfterRoll
+    date == previousToday && selectedWasToday -> currentToday
+    else -> date
+}
+
 class CheckinViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = CheckinRepository.get(application)
     // Writes already requested on pause must finish even if the Activity's ViewModel is cleared.
     private val writeJob = SupervisorJob()
     private val writeScope = CoroutineScope(writeJob + Dispatchers.Main.immediate)
+    internal val hasPendingWrites: Boolean get() = writeJob.children.any { !it.isCompleted }
     private val drafts = DraftSaver(writeScope, save = { field, value ->
-        commitChange { current -> patchDraft(current, field, value, CheckinCore.today(), System.currentTimeMillis()) }
+        val today = currentDay()
+        commitChange { current -> patchDraft(current, field, value, today, System.currentTimeMillis()) }
     })
     private val messages = Channel<String>(Channel.BUFFERED)
     val events = messages.receiveAsFlow()
@@ -90,11 +114,20 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
 
     fun notify(message: String) { messages.trySend(message) }
 
-    fun resume() {
+    fun resume() = applyToday(CheckinCore.today())
+
+    /** Single date source for every write; crossing midnight rolls the visible day first. */
+    fun currentDay(): String {
         val current = CheckinCore.today()
-        selected = CheckinCore.rollDate(selected, today, current)
-        week = CheckinCore.rollDate(week, StudyPlan.monday(today), StudyPlan.monday(current))
-        today = current
+        if (current != today) applyToday(current)
+        return current
+    }
+
+    private fun applyToday(current: String) {
+        val rolled = rollToday(today, selected, week, current)
+        today = rolled.today
+        selected = rolled.selected
+        week = rolled.week
     }
     fun refresh() { viewModelScope.launch { reload() } }
 
@@ -129,35 +162,69 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
     internal fun flushDraft(field: DraftField) = drafts.flush(field)
     fun flushDrafts() = drafts.flushAll()
 
-    fun edit(block: (JSONObject) -> Unit) = change { it.apply(block) }
-    fun editDay(date: String = selected, block: (JSONObject) -> Unit) = change {
-        editDayRecord(it, date, CheckinCore.today(), System.currentTimeMillis(), block)
+    fun edit(block: (JSONObject) -> Unit) {
+        currentDay()
+        change { it.apply(block) }
     }
-    fun toggleTask(date: String, id: String) = change {
-        toggleTaskWithUndo(it, plan, date, CheckinCore.today(), id, System.currentTimeMillis())
+
+    fun editDay(date: String? = null, block: (JSONObject) -> Unit) {
+        val previousToday = today
+        val selectedWasToday = selected == previousToday
+        val current = currentDay()
+        val target = resolveWriteDate(date, previousToday, current, selected, selectedWasToday)
+        val now = System.currentTimeMillis()
+        change { editDayRecord(it, target, current, now, block) }
     }
+
+    fun toggleTask(date: String, id: String) {
+        val previousToday = today
+        val selectedWasToday = selected == previousToday
+        val current = currentDay()
+        val target = resolveWriteDate(date, previousToday, current, selected, selectedWasToday)
+        val now = System.currentTimeMillis()
+        change { toggleTaskWithUndo(it, plan, target, current, id, now) }
+    }
+
     internal fun dismissUndo(token: String) {
         dismissedUndo = token
         if (pendingUndo?.token == token) pendingUndo = null
     }
-    internal fun undoTask(step: UndoStep) = change(noChange = "撤销已过期或任务已变化") {
-        undoTask(it, plan, step.token, CheckinCore.today(), System.currentTimeMillis())
-    }
-    fun editWeek(date: String = week, block: (JSONObject) -> Unit) = change {
-        require(date <= StudyPlan.monday(CheckinCore.today())) { "未来周目标只读" }
-        val record = it.obj("weeks").optJSONObject(date) ?: StudyPlan.week()
-        block(record)
-        record.put("u", System.currentTimeMillis())
-        it.obj("weeks").put(date, record)
-        it
+    internal fun undoTask(step: UndoStep) {
+        val current = currentDay()
+        val now = System.currentTimeMillis()
+        change(noChange = "撤销已过期或任务已变化") {
+            undoTask(it, plan, step.token, current, now)
+        }
     }
 
-    fun copyPreviousWeekGoals(week: String = this.week) {
+    fun editWeek(date: String? = null, block: (JSONObject) -> Unit) {
+        val previousWeek = week
+        val previousToday = today
+        val wasCurrentWeek = previousWeek == StudyPlan.monday(previousToday)
+        val current = currentDay()
+        val target = if (date != null && date == previousWeek && wasCurrentWeek) week else date ?: week
+        val now = System.currentTimeMillis()
+        change {
+            require(target <= StudyPlan.monday(current)) { "未来周目标只读" }
+            val record = it.obj("weeks").optJSONObject(target) ?: StudyPlan.week()
+            block(record)
+            record.put("u", now)
+            it.obj("weeks").put(target, record)
+            it
+        }
+    }
+
+    fun copyPreviousWeekGoals(week: String? = null) {
+        val previousWeek = this.week
+        val previousToday = today
+        val wasCurrentWeek = previousWeek == StudyPlan.monday(previousToday)
+        val current = currentDay()
+        val target = if (week != null && week == previousWeek && wasCurrentWeek) this.week else week ?: this.week
         // Main.immediate queues these writes on the mutex before the copy operation.
-        (0..2).forEach { flushDraft(DraftField.WeekGoal(week, it)) }
+        (0..2).forEach { flushDraft(DraftField.WeekGoal(target, it)) }
         change(success = "已复制上周目标", noChange = "上周没有目标") {
-            require(week <= StudyPlan.monday(CheckinCore.today())) { "未来周目标只读" }
-            if (plan.copyPreviousWeekGoals(it, week)) it else null
+            require(target <= StudyPlan.monday(current)) { "未来周目标只读" }
+            if (plan.copyPreviousWeekGoals(it, target)) it else null
         }
     }
 
@@ -203,7 +270,16 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
 
     fun exportText(): String = recoveryRaw ?: CheckinCore.backupJSON(state)
     fun confirmBackup() = edit { it.put("bk", System.currentTimeMillis()) }
-    fun makeup(date: String) = edit { plan.useMakeup(date, it, CheckinCore.today()) }
+
+    fun makeup(date: String) {
+        val current = currentDay()
+        change { plan.useMakeup(date, it, current); it }
+    }
+
+    fun toggleChapter(subject: JSONObject, index: Int) {
+        val current = currentDay()
+        change { state -> toggleChapter(state, subject, index, current) }
+    }
 
     fun retireTask(name: String) = edit { current ->
         current.put("recur", JSONArray(current.arr("recur").values().filter { it != name }))

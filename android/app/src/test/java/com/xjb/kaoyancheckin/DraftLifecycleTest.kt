@@ -11,6 +11,13 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import java.time.Clock
 import java.time.Instant
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.After
@@ -29,6 +36,7 @@ import org.robolectric.annotation.GraphicsMode
 class DraftLifecycleTest {
     private lateinit var previousClock: Clock
     private lateinit var app: Application
+    private lateinit var database: TestDatabase
 
     @Before fun setUp() {
         UpdateServices.backendOverride = NoNetworkUpdateBackend
@@ -36,16 +44,20 @@ class DraftLifecycleTest {
         CheckinCore.clock = Clock.fixed(Instant.parse("2026-11-10T04:00:00Z"), CheckinCore.shanghai)
         app = ApplicationProvider.getApplicationContext()
         app.getSharedPreferences(ThemeRepository.PREFERENCES, Context.MODE_PRIVATE).edit().clear().commit()
-        CheckinRepository.reset()
-        app.deleteDatabase("checkin.db")
+        database = TestDatabase(app)
     }
 
-    @After fun tearDown() { CheckinCore.clock = previousClock; UpdateServices.backendOverride = null }
+    @After fun tearDown() {
+        try { database.close() } finally {
+            CheckinCore.clock = previousClock
+            UpdateServices.backendOverride = null
+        }
+    }
 
     @Test fun switchingTabsAndPausingPersistDraftsAlongsideOtherEdits() {
         val date = "2026-11-10"
         val week = "2026-11-09"
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        database.launchActivity().use { scenario ->
             val model = awaitReady(scenario)
 
             scenario.onActivity {
@@ -83,7 +95,7 @@ class DraftLifecycleTest {
     }
 
     @Test fun changingThemeKeepsViewModelPageAndPendingDraft() {
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        database.launchActivity().use { scenario ->
             val model = awaitReady(scenario)
             val field = DraftField.DayReview("2026-11-10", "g")
             scenario.onActivity { activity ->
@@ -110,7 +122,7 @@ class DraftLifecycleTest {
     }
 
     @Test fun copyingGoalsAfterTypingKeepsLaterCheckboxChanges() {
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        database.launchActivity().use { scenario ->
             val model = awaitReady(scenario)
             val week = "2026-11-09"
             scenario.onActivity {
@@ -140,27 +152,54 @@ class DraftLifecycleTest {
     }
 
     @Test fun activityDestructionDoesNotCancelAFlushedWriteBeforeReload() {
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val readStarted = CountDownLatch(1)
+        val continueWrite = CountDownLatch(1)
+        try {
+            database.launchActivity().use { scenario ->
+                val model = awaitReady(scenario)
+                val blocker = scope.async {
+                    CheckinRepository.get(app).inspect {
+                        readStarted.countDown()
+                        check(continueWrite.await(15, TimeUnit.SECONDS))
+                    }
+                }
+                awaitCondition("阻塞存储写入") { readStarted.count == 0L }
+                scenario.onActivity {
+                    model.updateDraft(DraftField.DayReview("2026-11-10", "n"), "下次继续")
+                    model.flushDrafts()
+                }
+                assertTrue(model.hasPendingWrites)
+                scenario.close()
+                assertTrue(model.hasPendingWrites)
+                continueWrite.countDown()
+                awaitCondition("释放存储写入") { blocker.isCompleted }
+                runBlocking { blocker.await() }
+            }
+            database.awaitWrites()
+
+            val persisted = readPersisted()
+            assertEquals("下次继续", persisted.obj("days").obj("2026-11-10").obj("rw").optString("n"))
+
+            database.launchActivity().use { scenario ->
+                val reloaded = awaitReady(scenario)
+                assertEquals("下次继续", reloaded.state.obj("days").obj("2026-11-10").obj("rw").optString("n"))
+            }
+        } finally {
+            continueWrite.countDown()
+            scope.cancel()
+        }
+    }
+
+    @Test fun activityDestructionFlushesADraftWithoutAnExplicitSave() {
+        database.launchActivity().use { scenario ->
             val model = awaitReady(scenario)
             scenario.onActivity {
-                model.updateDraft(DraftField.DayReview("2026-11-10", "n"), "下次继续")
-                model.flushDrafts()
-            }
-            awaitCondition(
-                description = "销毁前的草稿写入完成",
-                current = { "ready=${model.ready}, state=${model.state}" },
-            ) {
-                model.state.obj("days").obj("2026-11-10").obj("rw").optString("n") == "下次继续"
+                model.updateDraft(DraftField.DayReview("2026-11-10", "g"), "退出前尚未保存的草稿")
             }
         }
-
-        val persisted = readPersisted()
-        assertEquals("下次继续", persisted.obj("days").obj("2026-11-10").obj("rw").optString("n"))
-
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            val reloaded = awaitReady(scenario)
-            assertEquals("下次继续", reloaded.state.obj("days").obj("2026-11-10").obj("rw").optString("n"))
-        }
+        database.awaitWrites()
+        assertEquals("退出前尚未保存的草稿", readPersisted().obj("days").obj("2026-11-10").obj("rw").getString("g"))
     }
 
     private fun awaitReady(scenario: ActivityScenario<MainActivity>): CheckinViewModel {
@@ -180,15 +219,7 @@ class DraftLifecycleTest {
         current: () -> Any? = { "" },
         condition: () -> Boolean,
     ) {
-        val looper = shadowOf(Looper.getMainLooper())
-        val deadline = System.nanoTime() + timeoutMillis * 1_000_000
-        while (true) {
-            looper.idle()
-            if (condition()) return
-            if (System.nanoTime() >= deadline) break
-            Thread.sleep(20)
-        }
-        fail("等待 $description 超时（${timeoutMillis}ms）；当前状态：${current()}")
+        awaitTestCondition(description, timeoutMillis, current, condition)
     }
 
     private fun readPersisted(): JSONObject {

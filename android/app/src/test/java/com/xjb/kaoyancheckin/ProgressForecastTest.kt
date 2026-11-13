@@ -45,6 +45,7 @@ class ProgressForecastTest {
         first: String? = null,
         completed: String? = null,
         total: Int = 10,
+        dates: Map<Int, String> = emptyMap(),
     ): JSONObject {
         val flags = JSONArray()
         repeat(total) { flags.put(it < done) }
@@ -54,6 +55,9 @@ class ProgressForecastTest {
             .put("ch", JSONObject().put("phys", flags))
         if (first != null) state.put("cf", JSONObject().put("phys", first))
         if (completed != null) state.put("ce", JSONObject().put("phys", completed))
+        if (dates.isNotEmpty()) {
+            state.put("cd", JSONObject().put("phys", JSONObject(dates.mapKeys { it.key.toString() })))
+        }
         return state
     }
 
@@ -375,6 +379,78 @@ class ProgressForecastTest {
         ) as SubjectForecast.Estimated
         assertTrue(overdue.planOverdue)
         assertTrue(formatSubjectForecast(overdue).contains("已超期"))
+    }
+
+    @Test
+    fun subjectForecastUsesRecentChapterDatesWhenAvailable() {
+        val forecast = forecastSubject(
+            subject(),
+            subjectState(
+                done = 5,
+                first = "2026-11-01",
+                dates = mapOf(
+                    0 to "2026-11-01",
+                    1 to "2026-11-02",
+                    2 to "2026-11-03",
+                    3 to "2026-11-20",
+                    4 to "2026-12-09",
+                ),
+            ),
+            date("2026-12-10"),
+        ) as SubjectForecast.Estimated
+
+        assertEquals(SubjectPace.RECENT, forecast.pace)
+        assertEquals(5, forecast.remaining)
+        assertEquals(date("2027-02-18"), forecast.estimatedDate)
+        val text = formatSubjectForecast(forecast)
+        assertTrue(text.contains("按近 28 天速度"))
+        assertTrue(text.contains("2月18日"))
+    }
+
+    @Test
+    fun subjectForecastFallsBackToAverageWhenRecentWindowIsEmpty() {
+        val forecast = forecastSubject(
+            subject(),
+            subjectState(
+                done = 3,
+                first = "2026-11-01",
+                dates = mapOf(
+                    0 to "2026-11-01",
+                    1 to "2026-11-02",
+                    2 to "2026-11-10",
+                ),
+            ),
+            date("2026-12-20"),
+        ) as SubjectForecast.Estimated
+
+        assertEquals(SubjectPace.AVERAGE, forecast.pace)
+        assertEquals(date("2027-04-16"), forecast.estimatedDate)
+        assertFalse(formatSubjectForecast(forecast).contains("按近 28 天速度"))
+    }
+
+    @Test
+    fun subjectForecastNeedsThreeDatedChaptersAndSevenDaySpanForRecentPace() {
+        val tooFew = forecastSubject(
+            subject(),
+            subjectState(
+                done = 5,
+                first = "2026-11-01",
+                dates = mapOf(0 to "2026-11-01", 1 to "2026-11-20"),
+            ),
+            date("2026-12-10"),
+        ) as SubjectForecast.Estimated
+        val tooShort = forecastSubject(
+            subject(),
+            subjectState(
+                done = 3,
+                first = "2026-11-01",
+                dates = mapOf(0 to "2026-11-01", 1 to "2026-11-03", 2 to "2026-11-05"),
+            ),
+            date("2026-12-10"),
+        ) as SubjectForecast.Estimated
+
+        assertEquals(SubjectPace.AVERAGE, tooFew.pace)
+        assertEquals(SubjectPace.AVERAGE, tooShort.pace)
     }
 
     @Test

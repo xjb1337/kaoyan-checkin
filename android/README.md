@@ -33,6 +33,16 @@ sdk.dir=/你的/Android/Sdk
 
 技术版本固定为 AGP 8.7.3、Kotlin 1.9.24、KSP 1.9.24-1.0.20、Compose BOM 2024.09.03、Compose Compiler 1.5.14、Room 2.6.1。没有通知推送、相机、网页套壳或云同步；网络权限用于匿名检查和下载应用更新。
 
+### Robolectric 数据库隔离
+
+使用 ActivityScenario + Room 的测试统一通过 `TestDatabase` 启动 Activity，并在恢复 Clock、更新后端等全局配置之前关闭它。它会关闭所有 Scenario，反复推进主 Looper、等待 ViewModel 写入子任务完成，再 reset/delete 数据库；不能只等待 `state` 更新就开始下一测试，也不能在主线程阻塞等待仍需主 Looper 执行的协程。
+
+Robolectric 同一 sandbox 会复用 AndroidX 2.8.6 的 `AndroidViewModelFactory._instance`，其中保存的 Application 可能来自上一测试。只删除当前 Application 的数据库不能隔离旧 Application 目录。辅助会在测试边界清除此缓存，并检查每个新 ViewModel 使用当前测试的 Application；升级 AndroidX 后需核对该字段。
+
+Repository 的每一代连接在 IO 线程同步执行 DAO 操作，读写与关闭共用连接锁。`reset()` 退役旧连接后，旧 store 的读取和后续写入都会失败，不能懒打开已删除的数据库。正常 Activity 暂停/销毁不会 reset 或取消写入；生命周期测试用闩锁阻塞存储，确认销毁后已发起的写入仍落盘。
+
+`RepositoryIsolationTest` 覆盖未打开旧连接、读写之间 reset；`CrossMidnightTest` 覆盖今日/历史日期、跨周目标复制、章节日期与 ON_RESUME。前台日期轮询按距上海午夜时间等待，最短 1 秒、最长 60 秒，避免固定时钟过密轮询，并在设备改时后及时重新检查。
+
 ### JVM 界面截图
 
 截图测试使用 Robolectric 的 API 34 原生图形模式与 Roborazzi，不需要模拟器。它会将 `app/src/test/resources/screenshot-seed.json` 按完整恢复流程写入测试数据库，再启动真实 Activity，录制六个页面的浅色和深色图。测试时将日期固定为上海时间 2026-11-09；应用实际运行时仍使用系统日期。

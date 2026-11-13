@@ -10,7 +10,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.Lifecycle
-import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import java.time.Clock
 import java.time.Instant
@@ -37,6 +36,7 @@ import org.robolectric.annotation.GraphicsMode
 class UndoLifecycleTest {
     @get:Rule val compose = createEmptyComposeRule()
     private lateinit var app: Application
+    private lateinit var database: TestDatabase
     private lateinit var previousClock: Clock
     private val date = "2026-11-10"
 
@@ -45,14 +45,14 @@ class UndoLifecycleTest {
         previousClock = CheckinCore.clock
         CheckinCore.clock = Clock.fixed(Instant.parse("2026-11-10T04:00:00Z"), CheckinCore.shanghai)
         UpdateServices.backendOverride = NoNetworkUpdateBackend
-        CheckinRepository.reset()
-        app.deleteDatabase("checkin.db")
-        check(!app.getDatabasePath("checkin.db").exists()) { "无法重置测试数据库" }
+        database = TestDatabase(app)
     }
 
     @After fun tearDown() {
-        CheckinCore.clock = previousClock
-        UpdateServices.backendOverride = null
+        try { database.close() } finally {
+            CheckinCore.clock = previousClock
+            UpdateServices.backendOverride = null
+        }
     }
 
     private fun widgetToggle() {
@@ -89,7 +89,7 @@ class UndoLifecycleTest {
     @Test fun widgetActionsAreUndoableOnOpenAndInForegroundAndExpireInBackground() {
         // Simulate a completed widget write before the Activity or its ViewModel exists.
         widgetToggle()
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        database.launchActivity().use { scenario ->
             lateinit var model: CheckinViewModel
             scenario.onActivity { model = ViewModelProvider(it)[CheckinViewModel::class.java] }
             waitForSnackbar(model)

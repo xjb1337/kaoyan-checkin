@@ -81,7 +81,7 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
         onDispose { model.flushDrafts(); lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(openTodaySignal) {
-        if (openTodaySignal > 0) { model.page = 0; model.selected = CheckinCore.today() }
+        if (openTodaySignal > 0) { model.page = 0; model.selected = model.currentDay() }
     }
     UpdateDialog(updates)
     LaunchedEffect(model) { model.events.collect { Toast.makeText(context, it, Toast.LENGTH_LONG).show() } }
@@ -103,7 +103,10 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
         }
     }
     LaunchedEffect(lifecycle) {
-        while (true) { delay(30_000); if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) model.resume() }
+        while (true) {
+            delay(CheckinCore.todayRefreshDelayMillis())
+            if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) model.resume()
+        }
     }
     val c = webColors
     Column(Modifier.fillMaxSize().background(c.bg).imePadding()

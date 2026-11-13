@@ -12,7 +12,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.lifecycle.ViewModelProvider
 import androidx.room.Room
-import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import com.github.takahirom.roborazzi.captureRoboImage
 import java.io.File
@@ -41,6 +40,7 @@ class ScreenshotTest {
 
     private lateinit var previousTimeZone: TimeZone
     private lateinit var previousClock: Clock
+    private lateinit var testDatabase: TestDatabase
     private val screenshotInstant = Instant.parse("2026-11-09T13:30:00Z")
 
     @Before
@@ -53,9 +53,7 @@ class ScreenshotTest {
 
         val app = ApplicationProvider.getApplicationContext<Application>()
         app.getSharedPreferences(ThemeRepository.PREFERENCES, Context.MODE_PRIVATE).edit().clear().commit()
-        CheckinRepository.reset()
-        app.deleteDatabase("checkin.db")
-        check(!app.getDatabasePath("checkin.db").exists()) { "Could not reset screenshot database" }
+        testDatabase = TestDatabase(app)
         val raw = checkNotNull(javaClass.getResourceAsStream("/screenshot-seed.json"))
             .bufferedReader().use { it.readText() }
         // Follow the same validation, normalization and recovery rules as a real replacement import.
@@ -73,9 +71,11 @@ class ScreenshotTest {
 
     @After
     fun restoreTimeZone() {
-        UpdateServices.backendOverride = null
-        CheckinCore.clock = previousClock
-        TimeZone.setDefault(previousTimeZone)
+        try { testDatabase.close() } finally {
+            UpdateServices.backendOverride = null
+            CheckinCore.clock = previousClock
+            TimeZone.setDefault(previousTimeZone)
+        }
     }
 
     @Test
@@ -94,7 +94,7 @@ class ScreenshotTest {
             "统计" to "stats", "节点" to "mile", "设置" to "set",
         )
 
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        testDatabase.launchActivity().use { scenario ->
             lateinit var model: CheckinViewModel
             scenario.onActivity { model = ViewModelProvider(it)[CheckinViewModel::class.java] }
             // The ViewModel loads Room asynchronously; wait for content rather than a loading frame.
