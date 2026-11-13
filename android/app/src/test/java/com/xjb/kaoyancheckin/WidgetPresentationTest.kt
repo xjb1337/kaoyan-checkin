@@ -24,4 +24,10 @@ class WidgetPresentationTest {
         assertEquals("计划尚未开始", widgetStatus(snapshot.copy(beforePlan = true)).summary)
         assertEquals("存档异常，请打开应用", widgetStatus(null).summary)
     }
+
+    @Test fun emptyStatesUseStatusAndActionLabelsWithoutTutorialSentences() {
+        assertEquals("⚠ 存档异常", widgetEmptyLabel(null))
+        assertEquals("距开营 3 天", widgetEmptyLabel(snapshot.copy(beforePlan = true, daysToStart = 3)))
+        assertEquals("查看今日 ›", widgetEmptyLabel(snapshot))
+    }
 }

@@ -13,25 +13,32 @@ class ChapterEstimateTest {
         chapterEstimate(date(today), date(start), date(end), done, total, first?.let(::date), completed?.let(::date))
 
     @Test fun emptyBeforeStartAndMissingDatesAreExplicit() {
-        assertEquals("尚未开始", estimate(today = "2026-10-31"))
-        assertEquals("还没有勾选章节，无法估算", estimate())
-        assertEquals("还没有勾选章节，无法估算", estimate(done = 0, total = 0, first = "2026-11-10"))
-        assertEquals("已有勾选，但缺少首次勾选日期，暂无法估算", estimate(done = 1))
+        assertEquals(ChapterEstimateInfo("尚未开始"), estimate(today = "2026-10-31"))
+        assertEquals(ChapterEstimateInfo("0/10 章", "待勾选"), estimate())
+        assertEquals(ChapterEstimateInfo("暂无章节"), estimate(done = 0, total = 0, first = "2026-11-10"))
+        assertEquals(ChapterEstimateInfo("已有勾选", "缺首次日期"), estimate(done = 1))
     }
 
     @Test fun projectedDatesUseInclusiveDaysAndCompareWithPlan() {
-        assertEquals("按当前速度，预计 2026-11-12 学完，比计划提前 8 天", estimate(done = 5, first = "2026-11-09"))
-        assertEquals("按当前速度，预计 2026-12-20 学完，比计划推迟 30 天", estimate(done = 2, first = "2026-11-01"))
-        assertEquals("按当前速度，预计 2026-11-20 学完，正好按计划", estimate(done = 5, first = "2026-11-01"))
-        assertEquals("按当前速度，预计 2026-11-19 学完，比计划提前 1 天", estimate(done = 1, first = "2026-11-10"))
+        assertEquals(ChapterEstimateInfo("预计 2026-11-12 学完", "提前 8 天", ChapterEstimateTone.GOOD),
+            estimate(done = 5, first = "2026-11-09"))
+        assertEquals(ChapterEstimateInfo("预计 2026-12-20 学完", "推迟 30 天", ChapterEstimateTone.BAD),
+            estimate(done = 2, first = "2026-11-01"))
+        assertEquals(ChapterEstimateInfo("预计 2026-11-20 学完", "按计划", ChapterEstimateTone.GOOD),
+            estimate(done = 5, first = "2026-11-01"))
+        assertEquals(ChapterEstimateInfo("预计 2026-11-19 学完", "提前 1 天", ChapterEstimateTone.GOOD),
+            estimate(done = 1, first = "2026-11-10"))
         assertEquals(estimate(done = 1, first = "2026-11-10"), estimate(done = 1, first = "2026-11-11"))
     }
 
     @Test fun completionUsesRecordedDateAndNeverInventsAnOldOne() {
-        assertEquals("已完成，比计划提前 1 天", estimate(done = 10, completed = "2026-11-19"))
-        assertEquals("已完成，比计划推迟 1 天", estimate(done = 10, completed = "2026-11-21"))
-        assertEquals("已完成，正好按计划", estimate(done = 10, completed = "2026-11-20"))
-        assertEquals("已完成；缺少完成日期，暂无法与计划比较", estimate(done = 10))
+        assertEquals(ChapterEstimateInfo("已完成", "提前 1 天", ChapterEstimateTone.GOOD),
+            estimate(done = 10, first = "2026-11-01", completed = "2026-11-19"))
+        assertEquals(ChapterEstimateInfo("已完成", "推迟 1 天", ChapterEstimateTone.BAD),
+            estimate(done = 10, first = "2026-11-01", completed = "2026-11-21"))
+        assertEquals(ChapterEstimateInfo("已完成", "按计划", ChapterEstimateTone.GOOD),
+            estimate(done = 10, first = "2026-11-01", completed = "2026-11-20"))
+        assertEquals(ChapterEstimateInfo("已完成", "缺完成日期"), estimate(done = 10, first = "2026-11-01"))
     }
 
     @Test fun chapterDatesTrackTransitionsAndMergeWithBooleanArrays() {

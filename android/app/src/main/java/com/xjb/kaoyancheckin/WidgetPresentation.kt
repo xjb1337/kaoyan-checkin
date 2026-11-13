@@ -26,3 +26,9 @@ internal fun widgetStatus(snapshot: WidgetSnapshot?): WidgetStatus {
     }
     return WidgetStatus(summary, progress)
 }
+
+internal fun widgetEmptyLabel(snapshot: WidgetSnapshot?): String = when {
+    snapshot == null -> "⚠ 存档异常"
+    snapshot.beforePlan -> "距开营 ${snapshot.daysToStart ?: 0} 天"
+    else -> "查看今日 ›"
+}

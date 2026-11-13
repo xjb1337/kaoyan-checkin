@@ -1,6 +1,9 @@
 package com.xjb.kaoyancheckin
 
 import android.app.DatePickerDialog
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -50,17 +53,27 @@ internal fun daysBetween(from: String, to: String): Long = java.time.temporal.Ch
 
 // Web .card / h3: shared surface, hairline, shadow, and section heading.
 @Composable
-internal fun Section(title: String? = null, content: @Composable ColumnScope.() -> Unit) {
+internal fun Section(
+    title: String? = null,
+    badge: String? = null,
+    badgeColor: Color? = null,
+    badgeBackground: Color? = null,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     val c = webColors
     Column(
-        Modifier.fillMaxWidth()
+        modifier.fillMaxWidth()
             .shadow(if (c.dark) 0.dp else 1.dp, RoundedCornerShape(16.dp))
             .background(c.card, RoundedCornerShape(16.dp))
             .border(1.dp, c.line, RoundedCornerShape(16.dp))
             .padding(14.dp),
     ) {
         if (title != null) {
-            Text(title, style = MaterialTheme.typography.titleSmall, color = c.sub)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = c.sub)
+                if (badge != null) Chip(badge, badgeColor ?: c.accent, badgeBackground ?: c.chipBlue)
+            }
             Spacer(Modifier.height(10.dp))
         }
         content()
@@ -120,7 +133,7 @@ internal fun Chip(text: String, color: Color, background: Color, modifier: Modif
 
 @Composable
 internal fun TaskRow(label: String, checked: Boolean, enabled: Boolean = true, tag: String? = null, bold: Boolean = false,
-                     onDelete: (() -> Unit)? = null, onChange: () -> Unit) {
+                     minimum: Boolean = false, onDelete: (() -> Unit)? = null, onChange: () -> Unit) {
     val c = webColors
     Row(Modifier.fillMaxWidth().heightIn(min = 58.dp), verticalAlignment = Alignment.CenterVertically) {
         Row(Modifier.weight(1f).heightIn(min = 58.dp)
@@ -132,6 +145,7 @@ internal fun TaskRow(label: String, checked: Boolean, enabled: Boolean = true, t
                 fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal,
                 color = if (checked) c.sub else c.text,
                 textDecoration = if (checked) TextDecoration.LineThrough else TextDecoration.None)
+            if (minimum) Chip("最低线", c.accent, c.chipBlue)
             if (tag != null) {
                 val (fg, bg) = when (tag) {
                     "西综" -> c.blueTag to c.chipSubjectBlue
@@ -225,7 +239,7 @@ internal fun AddField(placeholder: String, enabled: Boolean = true, button: Stri
 @Composable
 internal fun DateNav(date: String, previous: () -> Unit, next: () -> Unit, current: () -> Unit,
     currentLabel: String, isCurrent: Boolean, datePicker: Boolean, canGoNext: Boolean = true, maxDate: String? = null,
-    onDate: (String) -> Unit = {}) {
+    status: String? = null, statusColor: Color? = null, statusBackground: Color? = null, onDate: (String) -> Unit = {}) {
     val context = LocalContext.current
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
         WebButton("‹", previous, Modifier.width(44.dp))
@@ -251,6 +265,8 @@ internal fun DateNav(date: String, previous: () -> Unit, next: () -> Unit, curre
                 }.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("${shortDate(date)}/${date.take(4)}", Modifier.weight(1f), textAlign = TextAlign.Center,
                     color = webColors.text, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                if (status != null) Chip(status, statusColor ?: webColors.accent, statusBackground ?: webColors.chipBlue)
+                Spacer(Modifier.width(6.dp))
                 CalendarIcon()
             }
         } else {
@@ -258,8 +274,18 @@ internal fun DateNav(date: String, previous: () -> Unit, next: () -> Unit, curre
                 textAlign = TextAlign.Center, color = webColors.text, fontSize = 15.sp, maxLines = 1)
         }
         WebButton("›", { if (canGoNext) next() }, Modifier.width(44.dp), enabled = canGoNext)
-        WebButton(currentLabel, current, enabled = !isCurrent)
+        WebButton(currentLabel, current, enabled = !isCurrent, primary = !isCurrent)
     }
+}
+
+@Composable
+internal fun WebLinkButton(text: String, url: String, modifier: Modifier = Modifier, enabled: Boolean = true) {
+    val context = LocalContext.current
+    WebButton(text, { openWeb(context, url) }, modifier, enabled)
+}
+
+internal fun openWeb(context: Context, url: String) {
+    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
 }
 
 @Composable
@@ -310,11 +336,18 @@ internal fun ProgressBar(progress: Float, modifier: Modifier = Modifier, height:
 }
 
 @Composable
-internal fun BarRow(label: String, value: String, progress: Float, color: Color) {
+internal fun BarRow(label: String, value: String, progress: Float, color: Color, target: Float? = null) {
+    val targetColor = webColors.accent
     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(label, Modifier.width(44.dp), color = webColors.sub, fontSize = 12.5.sp)
         Box(Modifier.weight(1f).height(10.dp).clip(CircleShape).background(webColors.line)) {
             Box(Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f)).background(color, CircleShape))
+            if (target != null) {
+                Canvas(Modifier.matchParentSize()) {
+                    val x = size.width * target.coerceIn(0f, 1f)
+                    drawLine(targetColor, Offset(x, 0f), Offset(x, size.height), 1.5.dp.toPx())
+                }
+            }
         }
         Text(value, Modifier.width(46.dp), textAlign = TextAlign.End, color = webColors.sub, fontSize = 11.5.sp, maxLines = 1)
     }

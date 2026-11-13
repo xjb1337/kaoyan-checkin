@@ -416,25 +416,24 @@ internal fun forecastHours(state: JSONObject, plan: StudyPlan, today: LocalDate)
 
 internal fun formatWordsForecast(forecast: WordForecast): String = when (forecast) {
     is WordForecast.Completed ->
-        "单词：已完成（累计 ${forecast.total} / ${forecast.goal}）"
+        "单词：累计 ${forecast.total} / ${forecast.goal}"
     is WordForecast.Insufficient ->
-        "单词：近 ${FORECAST_WINDOW_DAYS} 天记录不足 ${MIN_WORD_ACTIVE_DAYS} 天，数据不足，暂不预测"
+        "单词：累计 ${forecast.total} / ${forecast.goal}"
     is WordForecast.Estimated -> buildString {
-        append("单词：日均新词 ${oneDecimal(forecast.averagePerDay)} 个，")
-        append("预计 ${monthDay(forecast.estimatedDate)} 过完第一轮，")
-        append(wordPlanComparison(forecast.planDeltaDays))
+        append("单词：日均新词 ${oneDecimal(forecast.averagePerDay)} 个 · ")
+        append("预计 ${monthDay(forecast.estimatedDate)} 过完第一轮")
         if (forecast.requiredDaily != null && !forecast.requiredDailyForExam) {
-            append("；需日均 ${forecast.requiredDaily} 个才能在节点（${monthDay(forecast.planTarget)}）前完成")
+            append(" · 日均需 ${forecast.requiredDaily} 个")
         }
         when {
-            forecast.examMarginDays > 0 -> append("，距初试还有 ${forecast.examMarginDays} 天")
-            forecast.examMarginDays == 0L -> append("，预计正好在初试当天完成")
+            forecast.examMarginDays > 0 -> append(" · 距初试 ${forecast.examMarginDays} 天")
+            forecast.examMarginDays == 0L -> append(" · 初试当天")
             else -> {
-                append("；按当前速度初试前完不成")
+                append(" · 初试前完不成")
                 if (forecast.requiredDaily != null && forecast.requiredDailyForExam) {
-                    append("，需日均 ${forecast.requiredDaily} 个才能在初试前完成")
+                    append(" · 日均需 ${forecast.requiredDaily} 个")
                 }
-                append("（预计晚于初试 ${-forecast.examMarginDays} 天）")
+                append(" · 晚于初试 ${-forecast.examMarginDays} 天")
             }
         }
     }
@@ -442,33 +441,23 @@ internal fun formatWordsForecast(forecast: WordForecast): String = when (forecas
 
 internal fun formatSubjectForecast(forecast: SubjectForecast): String = when (forecast) {
     is SubjectForecast.NotStarted ->
-        "${forecast.subjectName}：未开始，计划 ${monthDay(forecast.planStart)} 开始"
+        "${forecast.subjectName}：${monthDay(forecast.planStart)} 开始"
     is SubjectForecast.Completed -> when {
         forecast.planDeltaDays == null ->
-            "${forecast.subjectName}：已完成（缺少完成日期，暂无法与计划比较）"
-        else ->
-            "${forecast.subjectName}：已完成，${completionComparison(forecast.planDeltaDays)}"
+            "${forecast.subjectName}：已完成"
+        forecast.completedDate == null ->
+            "${forecast.subjectName}：已完成"
+        else -> "${forecast.subjectName}：已完成 · ${monthDay(forecast.completedDate)}"
     }
-    is SubjectForecast.Insufficient -> {
-        val detail = when (forecast.reason) {
-            SubjectForecastGap.NO_CHAPTERS -> "还没勾选章节"
-            SubjectForecastGap.MISSING_FIRST_DATE -> "缺少首次勾选日期"
-            SubjectForecastGap.TOO_FEW_CHAPTERS -> "已学 ${forecast.done} 章"
-            SubjectForecastGap.TOO_SHORT -> "首次勾选至今 ${forecast.elapsedDays ?: 0} 天"
-        }
-        "${forecast.subjectName}：$detail，至少 ${MIN_CHAPTERS_FOR_FORECAST} 章且满 " +
-            "${MIN_CHAPTER_SPAN_DAYS} 天后再预测"
-    }
+    is SubjectForecast.Insufficient ->
+        "${forecast.subjectName}：${forecast.done}/${forecast.total} 章"
     is SubjectForecast.Estimated -> buildString {
-        append("${forecast.subjectName}：")
-        if (forecast.pace == SubjectPace.RECENT) append("按近 $RECENT_CHAPTER_WINDOW_DAYS 天速度，")
-        append("约 ${monthDay(forecast.estimatedDate)} 学完，")
-        append(estimateComparison(forecast.planDeltaDays))
+        append("${forecast.subjectName}：预计 ${monthDay(forecast.estimatedDate)} 学完")
         when {
-            forecast.planOverdue -> append("；计划已于 ${monthDay(forecast.planEnd)} 截止，已超期")
-            forecast.planEndsToday -> append("；计划今天截止，剩余 ${forecast.remaining} 章")
+            forecast.planOverdue -> append(" · 计划已于 ${monthDay(forecast.planEnd)} 截止")
+            forecast.planEndsToday -> append(" · 剩余 ${forecast.remaining} 章")
             forecast.weeklyNeeded != null ->
-                append("；为按期完成需每周 ${oneDecimal(forecast.weeklyNeeded)} 章")
+                append(" · 每周需 ${oneDecimal(forecast.weeklyNeeded)} 章")
         }
     }
 }
@@ -480,15 +469,21 @@ internal fun formatUpcomingSubjects(forecasts: List<SubjectForecast>): String? {
 }
 
 internal fun formatHoursForecast(forecast: HoursForecast): String = when (forecast) {
-    is HoursForecast.Insufficient ->
-        "时长：近 ${FORECAST_WINDOW_DAYS} 天有记录不足 ${MIN_HOURS_ACTIVE_DAYS} 天，数据不足，暂不预测"
+    is HoursForecast.Insufficient -> "时长"
     is HoursForecast.Estimated ->
-        "时长：近 ${FORECAST_WINDOW_DAYS} 天日均 ${oneDecimal(forecast.averageActual)}h / 目标 " +
-            "${oneDecimal(forecast.averageTarget)}h，达成率 ${forecast.achievementRate.roundToInt()}%"
+        "时长：日均 ${oneDecimal(forecast.averageActual)}h / 目标 " +
+            "${oneDecimal(forecast.averageTarget)}h · 达成率 ${forecast.achievementRate.roundToInt()}%"
 }
 
-/** One-line home-screen hint: current phase subjects first, then words, then study hours. */
-internal fun forecastSummary(plan: StudyPlan, state: JSONObject, today: LocalDate): String {
+internal data class ForecastSummaryItem(
+    val text: String,
+    val status: String,
+    val tone: ForecastTone,
+    val method: String? = null,
+)
+
+/** Home-screen highlights: current phase subjects first, then words, then study hours. */
+internal fun forecastSummaryItems(plan: StudyPlan, state: JSONObject, today: LocalDate): List<ForecastSummaryItem> {
     val exam = LocalDate.parse(plan.exam(state))
     val phase = plan.phase(today.toString(), state)
     val phaseStart = parseDate(phase.optString("s"))
@@ -500,35 +495,57 @@ internal fun forecastSummary(plan: StudyPlan, state: JSONObject, today: LocalDat
             (phaseStart == null || phaseEnd == null || (start <= phaseEnd && end >= phaseStart))
     }
 
-    val parts = mutableListOf<String>()
+    val items = mutableListOf<ForecastSummaryItem>()
     currentSubjects.forEach { subject ->
         when (val forecast = forecastSubject(subject, state, today)) {
             is SubjectForecast.Estimated ->
-                parts.add("${forecast.subjectName}${if (forecast.pace == SubjectPace.RECENT) "按近 $RECENT_CHAPTER_WINDOW_DAYS 天速度" else ""}" +
-                    "约 ${monthDay(forecast.estimatedDate)}学完，${earlyOrLate(forecast.planDeltaDays)}")
-            is SubjectForecast.Completed -> parts.add("${forecast.subjectName}已完成")
+                items.add(ForecastSummaryItem(
+                    text = "${forecast.subjectName} · 预计 ${monthDay(forecast.estimatedDate)} 学完",
+                    status = earlyOrLate(forecast.planDeltaDays),
+                    tone = forecast.tone,
+                    method = if (forecast.pace == SubjectPace.RECENT) "近${RECENT_CHAPTER_WINDOW_DAYS}天" else "平均",
+                ))
+            is SubjectForecast.Completed -> items.add(ForecastSummaryItem(
+                text = forecast.subjectName,
+                status = "已完成",
+                tone = ForecastTone.GOOD,
+            ))
             else -> Unit
         }
     }
     when (val forecast = forecastWords(state, today, exam = exam)) {
         is WordForecast.Estimated -> {
             val requiredDaily = forecast.requiredDaily
-            parts.add(
-                if (forecast.estimatedDate > exam && requiredDaily != null)
-                    "单词按当前速度初试前完不成，需日均 $requiredDaily 个"
-                else "单词约 ${monthDay(forecast.estimatedDate)}过完第一轮",
-            )
+            items.add(if (forecast.estimatedDate > exam && requiredDaily != null) {
+                ForecastSummaryItem(
+                    text = "单词 · 初试前完不成",
+                    status = "日均需 $requiredDaily 个",
+                    tone = ForecastTone.BAD,
+                    method = "近${FORECAST_WINDOW_DAYS}天",
+                )
+            } else {
+                ForecastSummaryItem(
+                    text = "单词 · 预计 ${monthDay(forecast.estimatedDate)} 过完第一轮",
+                    status = earlyOrLate(forecast.planDeltaDays),
+                    tone = forecast.tone,
+                    method = "近${FORECAST_WINDOW_DAYS}天",
+                )
+            })
         }
-        is WordForecast.Completed -> parts.add("单词第一轮已完成")
+        is WordForecast.Completed -> items.add(ForecastSummaryItem("单词第一轮", "已完成", ForecastTone.GOOD))
         is WordForecast.Insufficient -> Unit
     }
     when (val forecast = forecastHours(state, plan, today)) {
         is HoursForecast.Estimated ->
-            parts.add("日均学习 ${oneDecimal(forecast.averageActual)}h，达成率 ${forecast.achievementRate.roundToInt()}%")
+            items.add(ForecastSummaryItem(
+                text = "日均学习 ${oneDecimal(forecast.averageActual)}h",
+                status = "达成率 ${forecast.achievementRate.roundToInt()}%",
+                tone = forecast.tone,
+                method = "近${FORECAST_WINDOW_DAYS}天",
+            ))
         is HoursForecast.Insufficient -> Unit
     }
-    return if (parts.isEmpty()) "预测：数据不足，多打卡几天再看"
-    else "预测：" + parts.joinToString("；")
+    return items
 }
 
 private fun parseDate(value: String): LocalDate? {
@@ -541,24 +558,6 @@ private fun monthDay(date: LocalDate): String = "${date.monthValue}月${date.day
 private fun earlyOrLate(deltaDays: Long): String = when {
     deltaDays < 0 -> "提前 ${-deltaDays} 天"
     deltaDays > 0 -> "落后 $deltaDays 天"
-    else -> "正好按计划"
-}
-
-private fun wordPlanComparison(deltaDays: Long): String = when {
-    deltaDays < 0 -> "比计划节点提前 ${-deltaDays} 天"
-    deltaDays > 0 -> "比计划节点落后 $deltaDays 天"
-    else -> "正好按计划节点"
-}
-
-private fun estimateComparison(deltaDays: Long): String = when {
-    deltaDays < 0 -> "比计划提前 ${-deltaDays} 天"
-    deltaDays > 0 -> "比计划落后 $deltaDays 天"
-    else -> "正好按计划"
-}
-
-private fun completionComparison(deltaDays: Long): String = when {
-    deltaDays < 0 -> "比计划提前 ${-deltaDays} 天"
-    deltaDays > 0 -> "比计划推迟 $deltaDays 天"
     else -> "正好按计划"
 }
 

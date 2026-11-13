@@ -2,9 +2,13 @@ package com.xjb.kaoyancheckin
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -23,6 +27,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xjb.kaoyancheckin.ui.theme.webColors
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
@@ -56,6 +61,7 @@ internal fun weekStats(plan: StudyPlan, state: JSONObject, today: String, week: 
 }
 
 // Web vToday: .daynav, backup reminder, .minline, task list, hours, review and stage details.
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun TodayScreen(model: CheckinViewModel) {
     val state = model.state
@@ -68,45 +74,72 @@ internal fun TodayScreen(model: CheckinViewModel) {
     val tasks = remember(model.plan, state, date, today) { model.plan.tasks(date, state, today) }
     val nextDate = StudyPlan.nextWithinLimit(date, model.today, 1)
     var deleteTarget by remember(date) { mutableStateOf<String?>(null) }
+    val tasksRequester = remember { BringIntoViewRequester() }
+    val scope = rememberCoroutineScope()
     DateNav(date, { model.selected = StudyPlan.addDays(date, -1) }, { nextDate?.let { model.selected = it } },
-        { model.selected = model.today }, "今天", isToday, true, canGoNext = nextDate != null, maxDate = model.today) {
+        { model.selected = model.today }, "今天", isToday, true, canGoNext = nextDate != null, maxDate = model.today,
+        status = when {
+            date > model.today -> "预览"
+            !isToday -> "补记"
+            else -> null
+        },
+        statusColor = if (date > model.today) webColors.accent else webColors.orange,
+        statusBackground = if (date > model.today) webColors.chipBlue else webColors.chipOrange,
+    ) {
         if (it <= model.today) model.selected = it
     }
-    if (!isToday) Banner(if (date > model.today) "未来日期 · 仅供预览，点「今天」返回" else "正在补记 $date，点「今天」返回", "info")
-    if (model.today < model.plan.start) Banner("🎯 ${shortDate(model.plan.start)} 正式开营，还有 ${daysBetween(model.today, model.plan.start)} 天 · 想提前开始也行", "info")
+    if (model.today < model.plan.start) Banner("🎯 开营 ${shortDate(model.plan.start)} · 还有 ${daysBetween(model.today, model.plan.start)} 天", "info")
     if (CheckinCore.needsBackup(state, System.currentTimeMillis())) {
         Banner("💾 记得备份到手机外 ·", "info") { WebButton("去备份", { model.page = 5 }) }
     }
     if (isToday && model.loadError.isEmpty()) {
-        Tip(
-            rememberTodayForecast(model.plan, state, today) + " ›",
-            Modifier.fillMaxWidth()
-                .clickable(role = Role.Button) { model.page = 1 }
-                .semantics { contentDescription = "查看学习进度预测" }
-                .padding(vertical = 4.dp),
-        )
+        val summary = rememberTodayForecast(model.plan, state, today)
+        if (summary.isEmpty()) {
+            Banner("预测 · 数据不足", "warn") {
+                WebButton("去打卡", { scope.launch { tasksRequester.bringIntoView() } })
+            }
+        } else {
+            ForecastGlance(summary) { model.page = 1 }
+        }
     }
     val maximum = if (phase.optInt("fs") == 1) 1 else 2
     val met = remember(model.plan, state, date, today) { model.plan.satisfied(date, state) }
     when {
-        date < model.plan.start && (date >= model.today || state.obj("days").optJSONObject(date) == null) ->
-            Banner("计划从 ${model.plan.start} 开始，之前不计欠打卡。", "info")
+        date < model.plan.start || date > model.today -> Unit
         model.plan.isMakeup(date, state) -> Banner("🩹 已用补签卡保住这天（本月还剩 ${model.plan.makeupLeft(date.take(7), state)} 张）", "ok")
-        met -> Banner("✓ 今日保底已完成 · 继续推进，或安心收工", "ok")
+        met -> Banner(if (isToday) "✓ 今日保底已完成" else "✓ 保底已完成", "ok")
         else -> {
-            val text = "⚡ 最低完成线 ${model.plan.minCount(date, state)}/$maximum　" + if (date < model.today) "这天还没达标，可以补记" else "先完成两项，今天就有进步"
-            if (date >= model.plan.start && date < model.today && phase.optInt("fs") != 1 && model.plan.makeupLeft(date.take(7), state) > 0)
-                Banner(text) { WebButton("🩹 用补签卡", { model.makeup(date) }, enabled = enabled) }
-            else Banner(text)
+            val past = date < model.today
+            Banner("最低完成线 ${model.plan.minCount(date, state)}/$maximum", if (past) "warn" else "info") {
+                Chip(if (past) "未达标" else "进行中",
+                    if (past) webColors.red else webColors.accent,
+                    if (past) webColors.chipRed else webColors.chipBlue)
+                if (past && phase.optInt("fs") != 1 && model.plan.makeupLeft(date.take(7), state) > 0)
+                    WebButton("🩹 用补签卡", { model.makeup(date) }, enabled = enabled)
+            }
         }
     }
-    Section("今日任务 ${tasks.count { model.plan.isDone(record, it.id) }}/${tasks.size}${if (date > model.today) "（未来日期，仅供预览）" else ""}") {
-        if (tasks.isEmpty() && date < model.plan.start) Tip("新计划尚未开始；可以先休息或自行准备学习资料。")
-        else if (date >= model.plan.start) Tip("两项最低线优先；其余是阶段参考，按每周安排选择，不必每天全部完成。")
+    Section(
+        "今日任务 ${tasks.count { model.plan.isDone(record, it.id) }}/${tasks.size}",
+        modifier = Modifier.bringIntoViewRequester(tasksRequester),
+    ) {
+        if (tasks.isEmpty() && date < model.plan.start) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CalendarIcon()
+                Text(shortDate(model.plan.start), color = webColors.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Chip("开营", webColors.accent, webColors.chipBlue)
+            }
+        }
         val minimumIds = phase.arr("tasks").values().filterIsInstance<JSONObject>().filter { it.optInt("min") == 1 }.map { it.optString("id") }.toSet()
-        tasks.forEach { task ->
+        val ordered = tasks.sortedByDescending { it.id in minimumIds }
+        val minimumTasks = ordered.filter { it.id in minimumIds }
+        val optionalTasks = ordered.filterNot { it.id in minimumIds }
+        @Composable
+        fun renderTask(task: StudyTask) {
             val deletable = task.id.startsWith("c:") || task.id.startsWith("r:")
             TaskRow(task.label, model.plan.isDone(record, task.id), enabled, task.tag, task.id in minimumIds,
+                minimum = task.id in minimumIds,
                 onDelete = if (deletable) ({ deleteTarget = task.id }) else null) {
                 model.toggleTask(date, task.id)
             }
@@ -124,6 +157,15 @@ internal fun TodayScreen(model: CheckinViewModel) {
                 }
             }
         }
+        minimumTasks.forEach { renderTask(it) }
+        if (minimumTasks.isNotEmpty() && optionalTasks.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("其他任务", Modifier.weight(1f), color = webColors.sub, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Chip("可选", webColors.sub, webColors.bg)
+            }
+        }
+        optionalTasks.forEach { renderTask(it) }
         AddField("加一条临时任务…", enabled) { name -> model.editDay(date) { day ->
             require(day.arr("c").values().none { (it as JSONObject).optString("n") == name }) { "任务已存在" }
             day.arr("c").put(JSONObject().put("n", name).put("d", false))
@@ -149,10 +191,9 @@ internal fun TodayScreen(model: CheckinViewModel) {
                     hourButton = true, accessibilityLabel = "增加${subject}半小时")
             }
         }
-        Tip("每次增减 0.5 小时，也可直接修改。总时长自动相加。")
         AddField("添加其他科目", enabled) { subject -> model.setHours(date, subject, 0.0) }
     }
-    Section("三问复盘 · 写一句也可以") {
+    Section("三问复盘", badge = "选填") {
         listOf("g" to "今天最大的收获", "s" to "今天卡住的地方", "n" to "明天第一件事").forEachIndexed { index, (field, title) ->
             if (index > 0) Spacer(Modifier.height(8.dp))
             AutoSaveField(model, DraftField.DayReview(date, field), title, record.obj("rw").optString(field), enabled, placeholder = "…")
@@ -177,14 +218,45 @@ internal fun TodayScreen(model: CheckinViewModel) {
             Spacer(Modifier.height(10.dp))
             ProgressBar(percent / 100f)
             Spacer(Modifier.height(8.dp))
-            Tip("单词已背约1300个：每天复习 + 新词约40个，寒假结束前过完第一轮，3月起转为复习和真题生词。平时可参考英语25–30分钟、西综50–60分钟；寒假每天3–4小时，以西综为主。")
-            Tip("平时每天1–2小时偏紧，周末尽量多学1小时；寒假是全年最长的整块时间，生化放在寒假完成。每月底对照章节进度调整，落后时先压缩新内容、保住复习。")
             Tip("本机保存不等于云备份。换手机前请导出 JSON，并保存到网盘或发给自己。")
         }
     }
     deleteTarget?.let { id ->
         ConfirmDialog("删除这条任务？", "只删除 $date 的当天记录，固定任务设置不会改变。",
             { deleteTarget = null }) { model.deleteCustomTask(date, id) }
+    }
+}
+
+@Composable
+private fun ForecastGlance(items: List<ForecastSummaryItem>, openDetails: () -> Unit) {
+    val c = webColors
+    Column(
+        Modifier.fillMaxWidth()
+            .background(c.card, RoundedCornerShape(12.dp))
+            .border(1.dp, c.line, RoundedCornerShape(12.dp))
+            .clickable(role = Role.Button, onClick = openDetails)
+            .semantics { contentDescription = "查看学习进度预测" }
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("学习预测", Modifier.weight(1f), color = c.sub, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text("详情 ›", color = c.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        }
+        items.take(4).forEach { item ->
+            val (color, background) = when (item.tone) {
+                ForecastTone.GOOD -> c.green to c.chipGreen
+                ForecastTone.BAD -> c.red to c.chipRed
+                ForecastTone.NEUTRAL -> c.sub to c.bg
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                    Text(item.text, color = c.text, fontSize = 12.5.sp, lineHeight = 18.sp)
+                    item.method?.let { Text(it, color = c.sub, fontSize = 10.sp, lineHeight = 14.sp) }
+                }
+                Chip(item.status, color, background)
+            }
+        }
     }
 }
 
@@ -227,8 +299,7 @@ internal fun WeekScreen(model: CheckinViewModel) {
         Spacer(Modifier.height(4.dp))
         WebButton("复制上周目标", { model.copyPreviousWeekGoals(week) }, enabled = enabled)
     }
-    Section("弹性任务") {
-        if (record.arr("ex").length() == 0) Tip("本周可做可不做的，放这里")
+    Section("弹性任务", badge = "可选") {
         record.arr("ex").values().forEachIndexed { index, value ->
             val task = value as JSONObject
             Row(verticalAlignment = Alignment.CenterVertically) {

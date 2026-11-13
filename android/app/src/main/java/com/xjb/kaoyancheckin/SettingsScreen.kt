@@ -82,8 +82,6 @@ internal fun SettingsScreen(model: CheckinViewModel, updates: UpdateViewModel, a
         }
     }
     Section("外观主题") {
-        Tip("选择后立即生效并保存在本机，浅色与深色跟随系统。")
-        Spacer(Modifier.height(10.dp))
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -93,7 +91,7 @@ internal fun SettingsScreen(model: CheckinViewModel, updates: UpdateViewModel, a
             }
         }
     }
-    Section("初试日期") {
+    Section("初试日期", badge = "预计", badgeColor = webColors.orange, badgeBackground = webColors.chipOrange) {
         SaveField("初试日期", model.plan.exam(model.state), "exam", enabled, showLabel = false, placeholder = "YYYY-MM-DD",
             trailing = {
                 Box(Modifier.size(32.dp).semantics { contentDescription = "选择初试日期" }.clickable(enabled = enabled) {
@@ -108,28 +106,36 @@ internal fun SettingsScreen(model: CheckinViewModel, updates: UpdateViewModel, a
             if (!CheckinCore.validDate(date)) model.notify("初试日期格式错误") else model.edit { it.obj("settings").put("exam", date) }
         }
         Spacer(Modifier.height(8.dp))
-        Tip("默认 2027-12-25 仅为规划占位，并非官方确认日期。请以正式公告为准。修改会影响倒计时与冲刺区间。")
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip("非官方", webColors.orange, webColors.chipOrange)
+            Spacer(Modifier.weight(1f))
+            WebLinkButton("研招网公告", "https://yz.chsi.com.cn/")
+        }
     }
     Section("单词第一轮") {
         val settings = model.state.obj("settings")
-        SaveField("单词基数", settings.optInt("wordBase", CheckinCore.DEFAULT_WORD_BASE).toString(),
+        val words = wordProgress(model.state, model.today)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("累计已背", color = webColors.sub, fontSize = 12.sp)
+            Spacer(Modifier.weight(1f))
+            Text("${words.total} 个", color = webColors.text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(8.dp))
+        SaveField("起始已背（个）", settings.optInt("wordBase", CheckinCore.DEFAULT_WORD_BASE).toString(),
             "wordBase", enabled, integer = true) { value ->
             val parsed = value.toIntOrNull()
             if (parsed == null || parsed !in 0..20000) model.notify("单词基数须为 0–20000 的整数")
             else model.edit { it.obj("settings").put("wordBase", parsed) }
         }
         Spacer(Modifier.height(8.dp))
-        SaveField("第一轮目标", settings.optInt("wordGoal", CheckinCore.DEFAULT_WORD_GOAL).toString(),
+        SaveField("第一轮目标（个）", settings.optInt("wordGoal", CheckinCore.DEFAULT_WORD_GOAL).toString(),
             "wordGoal", enabled, integer = true) { value ->
             val parsed = value.toIntOrNull()
             if (parsed == null || parsed !in 1..50000) model.notify("单词目标须为 1–50000 的整数")
             else model.edit { it.obj("settings").put("wordGoal", parsed) }
         }
-        Spacer(Modifier.height(8.dp))
-        Tip("累计已背 = 基数 + 每日新词；复习只计入当天记录。")
     }
     Section("固定每日任务（自定义）") {
-        if (model.state.arr("recur").length() == 0) Tip("没有固定任务。适合放\"跟导师课题推进\"这类长期项。")
         model.state.arr("recur").values().forEach { item ->
             val name = item as String
             Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -138,17 +144,26 @@ internal fun SettingsScreen(model: CheckinViewModel, updates: UpdateViewModel, a
             }
             Divider()
         }
-        AddField("任务名…", enabled, "加入每天") { name -> model.edit {
+        AddField("如：跟导师课题推进", enabled, "加入每天") { name -> model.edit {
             require(name.length <= 200) { "任务名请控制在 200 字以内" }
             require(name !in it.arr("recur").values()) { "任务已存在" }
             it.arr("recur").put(name)
         } }
     }
-    Section("补签卡") {
+    Section("补签卡", badge = "每月 2 张") {
         val left = model.plan.makeupLeft(model.today.take(7), model.state)
         val used = model.state.arr("mk").values().map { it as String }
-        val usedLine = if (used.isEmpty()) "" else "\n已使用：${used.takeLast(6).joinToString("、")}"
-        Tip("每月 2 张。某天漏了最低线，可在「今日」页切到那天点「🩹 用补签卡」，连胜即可保住。\n本月已用 ${2 - left} 张，剩余 $left 张。$usedLine")
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Chip("已用 ${2 - left}", webColors.sub, webColors.bg)
+            Chip("剩余 $left", if (left > 0) webColors.green else webColors.red,
+                if (left > 0) webColors.chipGreen else webColors.chipRed)
+        }
+        if (used.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                used.takeLast(6).forEach { date -> Chip(date.substring(5), webColors.accent, webColors.chipBlue) }
+            }
+        }
     }
     Section("备份与恢复") {
         val backupDate = model.state.optLong("bk").let { if (it == 0L) "从未备份" else java.time.Instant.ofEpochMilli(it).atZone(CheckinCore.shanghai).toLocalDate().toString() }
@@ -253,7 +268,7 @@ private fun ThemePreviewCard(theme: AppTheme, selected: Boolean, onClick: () -> 
             MiniThemePreview(paletteFor(theme, true), Modifier.weight(1f))
         }
         Text(theme.label, color = c.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-        Text(if (selected) "正在使用" else "浅色 / 深色", color = if (selected) c.accent else c.sub, fontSize = 11.sp, maxLines = 1)
+        Text(if (selected) "正在使用" else "跟随系统", color = if (selected) c.accent else c.sub, fontSize = 11.sp, maxLines = 1)
     }
 }
 

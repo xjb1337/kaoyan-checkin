@@ -58,7 +58,7 @@ internal class UpdateViewModel(app: Application) : AndroidViewModel(app) {
                         dialogVisible = true
                     }
                     UpdateCheck.Latest -> if (!silent) { available = null; verifiedFile = null; permissionNeeded = false; message = "已是最新版本。"; dialogVisible = true }
-                    UpdateCheck.NoManifest -> if (!silent) { available = null; verifiedFile = null; permissionNeeded = false; message = "当前 Release 没有自动更新信息。可到 Release 页面手动下载。"; dialogVisible = true }
+                    UpdateCheck.NoManifest -> if (!silent) { available = null; verifiedFile = null; permissionNeeded = false; message = "当前 Release 没有自动更新信息。"; dialogVisible = true }
                 }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
@@ -85,7 +85,7 @@ internal class UpdateViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun cancelDownload() { downloadJob?.cancel(); message = "已取消下载，可稍后重试或到 Release 页面手动下载。" }
+    fun cancelDownload() { downloadJob?.cancel(); message = "已取消下载" }
     fun dismiss() { if (!downloading) dialogVisible = false }
 
     fun openPermissionSettings() {

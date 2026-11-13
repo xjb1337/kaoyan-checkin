@@ -21,6 +21,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
@@ -81,6 +82,7 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val snackbar = remember { SnackbarHostState() }
     val notices = remember { SnackbarHostState() }
+    var onboardingDismissed by rememberSaveable { mutableStateOf(false) }
     DisposableEffect(context, lifecycle, model) {
         fun deliverWidgetNotice() {
             if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
@@ -157,10 +159,14 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
                         Text(model.loadError, color = c.red)
                         WebButton("前往设置，导出原始存档或恢复", { model.page = 5 })
                     }
-                    if (!CheckinCore.hasData(model.state) && model.page != 5) Section("从网页导出 JSON 导入") {
-                        Tip("已有网页记录？先导出备份，在这里延续学习进度。也可以直接开始打卡。")
-                        Spacer(Modifier.height(8.dp))
-                        WebButton("前往设置导入", { model.page = 5 })
+                    if (!CheckinCore.hasData(model.state) && model.page != 5 && !onboardingDismissed) Section("开始使用") {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            WebButton("导入网页备份", { model.page = 5 }, Modifier.weight(1f), big = true)
+                            WebButton("直接开始打卡", {
+                                onboardingDismissed = true
+                                model.page = 0
+                            }, Modifier.weight(1f), big = true, primary = true)
+                        }
                     }
                     when (model.page) {
                         0 -> TodayScreen(model)

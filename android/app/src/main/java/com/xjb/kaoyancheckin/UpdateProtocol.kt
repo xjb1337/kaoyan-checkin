@@ -108,5 +108,5 @@ internal object UpdateProtocol {
         UpdateFailure.CHECKSUM -> "安装包 SHA-256 校验失败，未启动安装。"
         UpdateFailure.STORAGE -> "无法保存或读取安装包，请检查手机存储空间。"
         UpdateFailure.INSTALL -> "无法打开系统安装器，请检查系统设置。"
-    } + "也可以到 Release 页面手动下载。"
+    }
 }

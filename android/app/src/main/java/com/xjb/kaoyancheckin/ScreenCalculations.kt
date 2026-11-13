@@ -12,7 +12,7 @@ internal data class PlannedSubject(
     val total: Int,
     val expected: Int,
     val upcoming: Boolean,
-    val estimate: String,
+    val estimate: ChapterEstimateInfo,
 ) {
     val difference: Int get() = done - expected
 }
@@ -60,8 +60,8 @@ internal fun rememberProgressCalculations(plan: StudyPlan, state: JSONObject, to
     }
 
 @Composable
-internal fun rememberTodayForecast(plan: StudyPlan, state: JSONObject, today: String): String =
-    remember(plan, state, today) { forecastSummary(plan, state, LocalDate.parse(today)) }
+internal fun rememberTodayForecast(plan: StudyPlan, state: JSONObject, today: String): List<ForecastSummaryItem> =
+    remember(plan, state, today) { forecastSummaryItems(plan, state, LocalDate.parse(today)) }
 
 internal data class HeatmapWeek(val monday: String, val completed: List<Pair<String, Int>>)
 

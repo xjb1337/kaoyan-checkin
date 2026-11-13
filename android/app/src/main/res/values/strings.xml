@@ -1,4 +1,4 @@
 <resources>
     <string name="app_name">考研打卡</string>
-    <string name="widget_description">查看今日最低线和连续打卡，直接勾选任务</string>
+    <string name="widget_description">今日最低线与打卡</string>
 </resources>
