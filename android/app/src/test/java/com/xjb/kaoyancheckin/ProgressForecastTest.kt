@@ -122,10 +122,7 @@ class ProgressForecastTest {
 
         assertTrue(forecast is WordForecast.Insufficient)
         assertEquals(4, (forecast as WordForecast.Insufficient).activeDays)
-        assertTrue(
-            formatWordsForecast(forecast)
-                .contains("近 14 天记录不足 5 天，数据不足，暂不预测"),
-        )
+        assertEquals("单词：累计 160 / 1000", formatWordsForecast(forecast))
     }
 
     @Test
@@ -135,7 +132,7 @@ class ProgressForecastTest {
 
         assertTrue(forecast is WordForecast.Completed)
         assertEquals(1200L, (forecast as WordForecast.Completed).total)
-        assertTrue(formatWordsForecast(forecast).contains("已完成"))
+        assertTrue(formatWordsForecast(forecast).contains("累计 1200 / 1200"))
     }
 
     @Test
@@ -162,8 +159,8 @@ class ProgressForecastTest {
         assertNull(forecast.requiredDaily)
         val text = formatWordsForecast(forecast)
         assertTrue(text.contains("日均新词 50.0 个"))
-        assertTrue(text.contains("提前 96 天"))
-        assertTrue(text.contains("距初试还有"))
+        assertTrue(text.contains("预计 11月24日 过完第一轮"))
+        assertTrue(text.contains("距初试 "))
     }
 
     @Test
@@ -185,8 +182,7 @@ class ProgressForecastTest {
         assertTrue(forecast.examMarginDays > 0)
         assertEquals(30, forecast.requiredDaily)
         assertFalse(forecast.requiredDailyForExam)
-        assertTrue(formatWordsForecast(forecast).contains("落后 20 天"))
-        assertTrue(formatWordsForecast(forecast).contains("需日均 30 个才能在节点（2月28日）前完成"))
+        assertTrue(formatWordsForecast(forecast).contains("日均需 30 个"))
     }
 
     @Test
@@ -209,8 +205,8 @@ class ProgressForecastTest {
         assertEquals(26, forecast.requiredDaily)
         assertFalse(forecast.requiredDailyForExam)
         val text = formatWordsForecast(forecast)
-        assertTrue(text.contains("需日均 26 个才能在节点（2月28日）前完成"))
-        assertTrue(text.contains("距初试还有"))
+        assertTrue(text.contains("日均需 26 个"))
+        assertTrue(text.contains("距初试 "))
     }
 
     @Test
@@ -232,8 +228,8 @@ class ProgressForecastTest {
         assertEquals(110, forecast.requiredDaily)
         assertFalse(forecast.requiredDailyForExam)
         val text = formatWordsForecast(forecast)
-        assertTrue(text.contains("需日均 110 个才能在节点（2月28日）前完成"))
-        assertTrue(text.contains("按当前速度初试前完不成"))
+        assertTrue(text.contains("日均需 110 个"))
+        assertTrue(text.contains("初试前完不成"))
         assertTrue(text.contains("晚于初试 60 天"))
     }
 
@@ -282,8 +278,7 @@ class ProgressForecastTest {
         assertTrue(forecast is SubjectForecast.Insufficient)
         assertEquals(SubjectForecastGap.MISSING_FIRST_DATE, (forecast as SubjectForecast.Insufficient).reason)
         val text = formatSubjectForecast(forecast)
-        assertTrue(text.contains("缺少首次勾选日期"))
-        assertTrue(text.contains("至少 2 章且满 7 天"))
+        assertEquals("生理：3/10 章", text)
     }
 
     @Test
@@ -304,7 +299,7 @@ class ProgressForecastTest {
 
         assertTrue(forecast is SubjectForecast.Insufficient)
         assertEquals(SubjectForecastGap.TOO_FEW_CHAPTERS, (forecast as SubjectForecast.Insufficient).reason)
-        assertTrue(formatSubjectForecast(forecast).contains("已学 1 章"))
+        assertEquals("生理：1/10 章", formatSubjectForecast(forecast))
     }
 
     @Test
@@ -319,7 +314,7 @@ class ProgressForecastTest {
         val insufficient = forecast as SubjectForecast.Insufficient
         assertEquals(SubjectForecastGap.TOO_SHORT, insufficient.reason)
         assertEquals(6L, insufficient.elapsedDays)
-        assertTrue(formatSubjectForecast(forecast).contains("首次勾选至今 6 天"))
+        assertEquals("生理：2/10 章", formatSubjectForecast(forecast))
     }
 
     @Test
@@ -337,10 +332,10 @@ class ProgressForecastTest {
 
         assertTrue(early is SubjectForecast.Completed)
         assertEquals(-7L, (early as SubjectForecast.Completed).planDeltaDays)
-        assertTrue(formatSubjectForecast(early).contains("比计划提前 7 天"))
+        assertEquals("生理：已完成 · 1月10日", formatSubjectForecast(early))
         assertTrue(late is SubjectForecast.Completed)
         assertEquals(3L, (late as SubjectForecast.Completed).planDeltaDays)
-        assertTrue(formatSubjectForecast(late).contains("比计划推迟 3 天"))
+        assertEquals("生理：已完成 · 1月20日", formatSubjectForecast(late))
     }
 
     @Test
@@ -357,8 +352,7 @@ class ProgressForecastTest {
         assertEquals(6 * 7.0 / 64.0, forecast.weeklyNeeded!!, 0.0001)
         assertFalse(forecast.planOverdue)
         val text = formatSubjectForecast(forecast)
-        assertTrue(text.contains("提前 43 天"))
-        assertTrue(text.contains("为按期完成需每周 0.7 章"))
+        assertEquals("生理：预计 12月5日 学完 · 每周需 0.7 章", text)
     }
 
     @Test
@@ -370,7 +364,7 @@ class ProgressForecastTest {
         ) as SubjectForecast.Estimated
         assertEquals(date("2027-01-09"), late.estimatedDate)
         assertEquals(39L, late.planDeltaDays)
-        assertTrue(formatSubjectForecast(late).contains("落后 39 天"))
+        assertTrue(formatSubjectForecast(late).contains("预计 1月9日 学完"))
 
         val overdue = forecastSubject(
             subject(),
@@ -378,7 +372,7 @@ class ProgressForecastTest {
             date("2027-01-20"),
         ) as SubjectForecast.Estimated
         assertTrue(overdue.planOverdue)
-        assertTrue(formatSubjectForecast(overdue).contains("已超期"))
+        assertTrue(formatSubjectForecast(overdue).contains("计划已于 1月17日 截止"))
     }
 
     @Test
@@ -403,8 +397,8 @@ class ProgressForecastTest {
         assertEquals(5, forecast.remaining)
         assertEquals(date("2027-02-18"), forecast.estimatedDate)
         val text = formatSubjectForecast(forecast)
-        assertTrue(text.contains("按近 28 天速度"))
         assertTrue(text.contains("2月18日"))
+        assertFalse(text.contains("按近 28 天速度"))
     }
 
     @Test
@@ -459,7 +453,7 @@ class ProgressForecastTest {
 
         assertTrue(forecast is SubjectForecast.NotStarted)
         assertEquals(date("2026-11-01"), (forecast as SubjectForecast.NotStarted).planStart)
-        assertTrue(formatSubjectForecast(forecast).contains("计划 11月1日 开始"))
+        assertEquals("生理：11月1日 开始", formatSubjectForecast(forecast))
     }
 
     @Test
@@ -493,7 +487,7 @@ class ProgressForecastTest {
         assertEquals(2.0, forecast.averageActual, 0.0001)
         assertEquals(1.5, forecast.averageTarget, 0.0001)
         assertEquals(133.333, forecast.achievementRate, 0.01)
-        assertTrue(formatHoursForecast(forecast).contains("日均 2.0h / 目标 1.5h，达成率 133%"))
+        assertTrue(formatHoursForecast(forecast).contains("日均 2.0h / 目标 1.5h · 达成率 133%"))
     }
 
     @Test
@@ -511,14 +505,12 @@ class ProgressForecastTest {
         assertTrue(forecast is HoursForecast.Insufficient)
         assertEquals(4, (forecast as HoursForecast.Insufficient).activeDays)
         assertEquals(date("2026-11-13"), forecast.windowEnd)
-        assertTrue(formatHoursForecast(forecast).contains("有记录不足 5 天"))
+        assertEquals("时长", formatHoursForecast(forecast))
     }
 
     @Test
     fun summaryFallsBackWhenEverythingIsInsufficient() {
-        val summary = forecastSummary(testPlan(), subjectState(done = 0), date("2026-11-14"))
-
-        assertEquals("预测：数据不足，多打卡几天再看", summary)
+        assertTrue(forecastSummaryItems(testPlan(), subjectState(done = 0), date("2026-11-14")).isEmpty())
     }
 
     @Test
@@ -535,10 +527,13 @@ class ProgressForecastTest {
             done = 4,
             first = "2026-11-01",
         )
-        val summary = forecastSummary(testPlan(), state, date("2026-11-14"))
+        val items = forecastSummaryItems(testPlan(), state, date("2026-11-14"))
 
-        assertTrue(summary.startsWith("预测：生理约 12月5日学完，提前 43 天"))
-        assertTrue(summary.contains("单词约 11月24日过完第一轮"))
-        assertTrue(summary.contains("日均学习 2.0h，达成率 133%"))
+        val subject = items.single { it.text.startsWith("生理") }
+        assertEquals("生理 · 预计 12月5日 学完", subject.text)
+        assertEquals("提前 43 天", subject.status)
+        assertEquals("平均", subject.method)
+        assertTrue(items.any { it.text == "单词 · 预计 11月24日 过完第一轮" })
+        assertTrue(items.any { it.text == "日均学习 2.0h" && it.status == "达成率 133%" })
     }
 }

@@ -30,7 +30,7 @@ class ScreenCacheTest {
         var unrelated by mutableIntStateOf(0)
         lateinit var progress: ProgressCalculations
         lateinit var statistics: StatsCalculations
-        var summary = ""
+        var summary = emptyList<ForecastSummaryItem>()
         var compositions = 0
         compose.setContent {
             val currentProgress = rememberProgressCalculations(plan, state, today)

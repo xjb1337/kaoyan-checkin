@@ -133,18 +133,14 @@ class CheckinWidget : AppWidgetProvider() {
             } else c.text
             views.setTextColor(R.id.widget_summary, summaryColor.toArgb())
             views.setTextColor(R.id.widget_streak, c.accent.toArgb())
-            views.setTextColor(R.id.widget_empty, c.sub.toArgb())
+            views.setTextColor(R.id.widget_empty, (if (snapshot == null) c.red else c.sub).toArgb())
             views.setViewVisibility(R.id.widget_title, if (layout.showTitle) View.VISIBLE else View.GONE)
             views.removeAllViews(R.id.widget_tasks)
             val visibleTasks = if (layout.compact) emptyList() else snapshot?.tasks.orEmpty().take(layout.columns * layout.maxRows)
             views.setViewVisibility(R.id.widget_tasks, if (visibleTasks.isNotEmpty()) View.VISIBLE else View.GONE)
             val showEmpty = !layout.compact && visibleTasks.isEmpty()
             views.setViewVisibility(R.id.widget_empty, if (showEmpty) View.VISIBLE else View.GONE)
-            if (showEmpty) views.setTextViewText(R.id.widget_empty, when {
-                snapshot == null -> "点击打开应用处理"
-                snapshot.beforePlan -> "计划开始后显示今日任务"
-                else -> "打开应用查看今日任务"
-            })
+            if (showEmpty) views.setTextViewText(R.id.widget_empty, widgetEmptyLabel(snapshot))
             if (snapshot != null) {
                 val checked = WidgetArtwork.check(density, c, true)
                 val unchecked = WidgetArtwork.check(density, c, false)

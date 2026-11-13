@@ -53,6 +53,10 @@ class UpdateProtocolTest {
         assertEquals(UpdateFailure.CHECKSUM, UpdateProtocol.classify(UpdateException(UpdateFailure.CHECKSUM, "bad")))
         assertEquals(UpdateFailure.TIMEOUT, UpdateProtocol.classify(SocketTimeoutException()))
         assertEquals(UpdateFailure.NETWORK, UpdateProtocol.classify(UnknownHostException()))
-        UpdateFailure.entries.forEach { assertTrue(UpdateProtocol.message(it).contains("手动下载")) }
+        UpdateFailure.entries.forEach {
+            val message = UpdateProtocol.message(it)
+            assertTrue(message.endsWith("。"))
+            assertFalse(message.contains("手动下载"))
+        }
     }
 }

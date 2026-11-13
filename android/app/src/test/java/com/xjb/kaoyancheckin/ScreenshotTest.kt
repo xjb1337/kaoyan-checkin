@@ -127,6 +127,17 @@ class ScreenshotTest {
             }
 
             compose.onNodeWithText("今日").performClick()
+            compose.runOnIdle { model.selected = "2026-11-10" }
+            compose.waitForIdle()
+            compose.onNodeWithText("预览").assertIsDisplayed()
+            capture("today-preview")
+            compose.runOnIdle { model.selected = "2026-11-08" }
+            compose.waitForIdle()
+            compose.onNodeWithText("补记").assertIsDisplayed()
+            compose.onNodeWithText("🩹 用补签卡").assertIsDisplayed()
+            capture("today-backfill")
+            compose.runOnIdle { model.selected = model.today }
+            compose.waitForIdle()
             compose.onNodeWithContentDescription("查看学习进度预测").assertIsDisplayed()
             compose.onNodeWithContentDescription("新词 数量").performScrollTo().assertIsDisplayed()
             capture("today-words")
@@ -148,7 +159,7 @@ class ScreenshotTest {
             compose.onNodeWithText("0/15").assertDoesNotExist()
             compose.onNodeWithText("章节进度").performScrollTo()
             capture("prog-chapters")
-            compose.onNodeWithText("按当前速度，预计", substring = true).performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("预计 2026-", substring = true).performScrollTo().assertIsDisplayed()
             capture("prog-estimate")
             compose.onNode(hasText("病理") and hasClickAction()).performScrollTo().performClick()
             compose.onNodeWithText("淋巴造血系统疾病").performScrollTo().assertIsDisplayed()
@@ -178,7 +189,7 @@ class ScreenshotTest {
             compose.onNodeWithText("进度").performClick()
             compose.waitForIdle()
             compose.onNodeWithText("学习进度预测").performScrollTo().assertIsDisplayed()
-            compose.onNodeWithText("生理：约 12月9日 学完", substring = true).assertIsDisplayed()
+            compose.onNodeWithText("生理：预计 12月9日 学完", substring = true).assertIsDisplayed()
             compose.onNodeWithText("预计 1月28日 过完第一轮", substring = true).assertIsDisplayed()
             capture("prog-forecast-estimated")
             compose.runOnIdle {
@@ -205,14 +216,44 @@ class ScreenshotTest {
             compose.onNodeWithText("人文 1/4章", substring = true).performScrollTo().assertIsDisplayed()
             capture("winter-week-humanities")
             compose.onNodeWithText("统计").performClick()
-            compose.onNodeWithText("近 8 周学习时长（橙=未达目标）").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("近 8 周学习时长").performScrollTo().assertIsDisplayed()
             capture("winter-stats")
             compose.runOnIdle { model.notify("示例提示：已保存学习记录") }
             compose.onNodeWithText("示例提示：已保存学习记录").assertIsDisplayed()
             compose.onNodeWithText("撤销").assertDoesNotExist()
             capture("notice-snackbar")
+            compose.mainClock.advanceTimeBy(6_000)
+            compose.waitForIdle()
             compose.onNodeWithText("今日").performClick()
             capture("tabbar")
+
+            CheckinCore.clock = Clock.fixed(Instant.parse("2026-10-25T13:30:00Z"), CheckinCore.shanghai)
+            compose.runOnIdle { model.resume() }
+            compose.waitForIdle()
+            check(compose.onAllNodesWithText("开营", substring = true).fetchSemanticsNodes().isNotEmpty())
+            capture("today-preplan")
+            compose.onNodeWithText("统计").performClick()
+            compose.waitForIdle()
+            capture("stats-empty")
+            compose.onNodeWithText("多").performScrollTo().assertIsDisplayed()
+            compose.waitForIdle()
+            capture("stats-heat-empty")
+            compose.onNodeWithText("进度").performClick()
+            compose.onNodeWithText("模考 / 真题套卷成绩").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("记录一次模考").performScrollTo().assertIsDisplayed()
+            compose.waitForIdle()
+            capture("prog-scores-empty")
+            compose.runOnIdle {
+                val chapters = model.state.obj("ch")
+                chapters.namesList().forEach { chapters.put(it, JSONArray()) }
+                model.state.obj("cf").namesList().forEach { model.state.obj("cf").remove(it) }
+                model.state.obj("ce").namesList().forEach { model.state.obj("ce").remove(it) }
+                model.page = 0
+            }
+            compose.onNodeWithText("进度").performClick()
+            compose.onNodeWithText("开始勾选章节").performScrollTo().performClick()
+            compose.waitForIdle()
+            capture("prog-chapters-empty")
         }
     }
 }

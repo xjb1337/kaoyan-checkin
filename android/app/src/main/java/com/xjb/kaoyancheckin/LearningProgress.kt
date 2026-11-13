@@ -17,32 +17,52 @@ internal fun wordProgress(state: JSONObject, today: String): WordProgress {
         words.optInt("n", 0), words.optInt("r", 0))
 }
 
-private fun planComparison(date: LocalDate, planEnd: LocalDate): String {
-    val difference = ChronoUnit.DAYS.between(planEnd, date)
-    return when {
-        difference < 0 -> "比计划提前 ${-difference} 天"
-        difference > 0 -> "比计划推迟 $difference 天"
-        else -> "正好按计划"
-    }
-}
+internal enum class ChapterEstimateTone { GOOD, BAD, NEUTRAL }
+
+internal data class ChapterEstimateInfo(
+    val text: String,
+    val status: String? = null,
+    val tone: ChapterEstimateTone = ChapterEstimateTone.NEUTRAL,
+)
 
 /** Dates are calendar dates supplied by the Shanghai-clock caller; estimates include the first day. */
 internal fun chapterEstimate(
     today: LocalDate, start: LocalDate, end: LocalDate, done: Int, total: Int,
     first: LocalDate?, completed: LocalDate?,
-): String = when {
-    today < start -> "尚未开始"
-    total <= 0 || done <= 0 -> "还没有勾选章节，无法估算"
-    done >= total -> if (completed == null) "已完成；缺少完成日期，暂无法与计划比较"
-        else "已完成，${planComparison(completed, end)}"
-    first == null -> "已有勾选，但缺少首次勾选日期，暂无法估算"
+): ChapterEstimateInfo = when {
+    today < start -> ChapterEstimateInfo("尚未开始")
+    total <= 0 -> ChapterEstimateInfo("暂无章节")
+    done <= 0 -> ChapterEstimateInfo("0/$total 章", "待勾选")
+    done >= total -> if (completed == null) ChapterEstimateInfo("已完成", "缺完成日期")
+        else {
+            val difference = ChronoUnit.DAYS.between(end, completed)
+            ChapterEstimateInfo(
+                "已完成",
+                when {
+                    difference < 0 -> "提前 ${-difference} 天"
+                    difference > 0 -> "推迟 $difference 天"
+                    else -> "按计划"
+                },
+                if (difference > 0) ChapterEstimateTone.BAD else ChapterEstimateTone.GOOD,
+            )
+        }
+    first == null -> ChapterEstimateInfo("已有勾选", "缺首次日期")
     else -> {
         val elapsed = (ChronoUnit.DAYS.between(first, today) + 1).coerceAtLeast(1)
         val remaining = (total - done).toLong()
         // Integer ceiling avoids rounding an unfinished chapter down to zero days.
         val days = (remaining * elapsed + done - 1) / done
         val estimate = today.plusDays(days)
-        "按当前速度，预计 $estimate 学完，${planComparison(estimate, end)}"
+        val difference = ChronoUnit.DAYS.between(end, estimate)
+        ChapterEstimateInfo(
+            "预计 $estimate 学完",
+            when {
+                difference < 0 -> "提前 ${-difference} 天"
+                difference > 0 -> "推迟 $difference 天"
+                else -> "按计划"
+            },
+            if (difference > 0) ChapterEstimateTone.BAD else ChapterEstimateTone.GOOD,
+        )
     }
 }
 
