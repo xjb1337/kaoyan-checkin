@@ -26,12 +26,15 @@ internal fun UpdateSettings(model: UpdateViewModel) {
 }
 
 @Composable
-internal fun UpdateDialog(model: UpdateViewModel) {
+internal fun UpdateDialog(model: UpdateViewModel, notify: (String) -> Unit) {
     if (!model.dialogVisible) return
     val context = LocalContext.current
     fun openRelease() {
         try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(UpdateProtocol.RELEASE_URL))) }
-        catch (_: Exception) { android.widget.Toast.makeText(context, "无法打开浏览器，请手动访问 ${UpdateProtocol.RELEASE_URL}", android.widget.Toast.LENGTH_LONG).show() }
+        catch (_: Exception) {
+            model.dismiss()
+            notify("无法打开浏览器，请手动访问 ${UpdateProtocol.RELEASE_URL}")
+        }
     }
     val update = model.available
     AlertDialog(

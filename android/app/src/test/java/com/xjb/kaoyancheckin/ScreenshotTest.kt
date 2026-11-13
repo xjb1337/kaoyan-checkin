@@ -3,8 +3,9 @@ package com.xjb.kaoyancheckin
 import android.app.Application
 import android.content.Context
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
-import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -12,15 +13,16 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.lifecycle.ViewModelProvider
 import androidx.room.Room
-import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import com.github.takahirom.roborazzi.captureRoboImage
 import java.io.File
 import java.time.Clock
 import java.time.Instant
+import java.time.LocalDate
 import java.util.TimeZone
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -39,6 +41,7 @@ class ScreenshotTest {
 
     private lateinit var previousTimeZone: TimeZone
     private lateinit var previousClock: Clock
+    private lateinit var testDatabase: TestDatabase
     private val screenshotInstant = Instant.parse("2026-11-09T13:30:00Z")
 
     @Before
@@ -51,9 +54,7 @@ class ScreenshotTest {
 
         val app = ApplicationProvider.getApplicationContext<Application>()
         app.getSharedPreferences(ThemeRepository.PREFERENCES, Context.MODE_PRIVATE).edit().clear().commit()
-        CheckinRepository.reset()
-        app.deleteDatabase("checkin.db")
-        check(!app.getDatabasePath("checkin.db").exists()) { "Could not reset screenshot database" }
+        testDatabase = TestDatabase(app)
         val raw = checkNotNull(javaClass.getResourceAsStream("/screenshot-seed.json"))
             .bufferedReader().use { it.readText() }
         // Follow the same validation, normalization and recovery rules as a real replacement import.
@@ -71,9 +72,11 @@ class ScreenshotTest {
 
     @After
     fun restoreTimeZone() {
-        UpdateServices.backendOverride = null
-        CheckinCore.clock = previousClock
-        TimeZone.setDefault(previousTimeZone)
+        try { testDatabase.close() } finally {
+            UpdateServices.backendOverride = null
+            CheckinCore.clock = previousClock
+            TimeZone.setDefault(previousTimeZone)
+        }
     }
 
     @Test
@@ -92,7 +95,7 @@ class ScreenshotTest {
             "统计" to "stats", "节点" to "mile", "设置" to "set",
         )
 
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        testDatabase.launchActivity().use { scenario ->
             lateinit var model: CheckinViewModel
             scenario.onActivity { model = ViewModelProvider(it)[CheckinViewModel::class.java] }
             // The ViewModel loads Room asynchronously; wait for content rather than a loading frame.
@@ -101,7 +104,9 @@ class ScreenshotTest {
                 check(model.loadError.isEmpty()) { model.loadError }
                 check(model.today == "2026-11-09")
                 val today = model.state.obj("days").obj("2026-11-09")
-                check(today.optDouble("h") == 2.5 && today.obj("t").optBoolean("words"))
+                check(today.optDouble("h") == 2.5 && today.obj("t").optBoolean("words")) {
+                    "Screenshot seed was not loaded: ${model.state}"
+                }
                 val week = model.state.obj("weeks").obj("2026-11-09")
                 check(week.arr("must").optString(0) == "生理第1–3章网课+讲义")
             }
@@ -122,32 +127,66 @@ class ScreenshotTest {
             }
 
             compose.onNodeWithText("今日").performClick()
+            compose.onNodeWithContentDescription("查看学习进度预测").assertIsDisplayed()
             compose.onNodeWithContentDescription("新词 数量").performScrollTo().assertIsDisplayed()
             capture("today-words")
+            compose.onNodeWithText("阶段计划与安装帮助").performScrollTo().assertIsDisplayed()
             compose.runOnIdle { model.toggleTask(model.today, "words") }
             compose.waitUntil(timeoutMillis = 15_000) {
                 compose.onAllNodesWithText("撤销").fetchSemanticsNodes().isNotEmpty()
             }
+            capture("today-undo-overlap")
+            compose.onNodeWithContentDescription("新词 数量").performScrollTo().assertIsDisplayed()
             capture("today-undo")
             compose.onNodeWithText("撤销").performClick()
 
             compose.onNodeWithText("进度").performClick()
-            compose.onNodeWithText("0/15").performScrollTo().assertIsDisplayed()
-            compose.onAllNodesWithText("0/9").assertCountEquals(2)
-            compose.onNodeWithText("0/4").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("学习进度预测").performScrollTo().assertIsDisplayed()
+            capture("prog-forecast")
+            compose.onNodeWithText("未开始：", substring = true).performScrollTo().assertIsDisplayed()
+            capture("prog-unstarted")
+            compose.onNodeWithText("0/15").assertDoesNotExist()
             compose.onNodeWithText("章节进度").performScrollTo()
             capture("prog-chapters")
             compose.onNodeWithText("按当前速度，预计", substring = true).performScrollTo().assertIsDisplayed()
             capture("prog-estimate")
-            compose.onAllNodesWithText("病理")[1].performScrollTo().performClick()
+            compose.onNode(hasText("病理") and hasClickAction()).performScrollTo().performClick()
             compose.onNodeWithText("淋巴造血系统疾病").performScrollTo().assertIsDisplayed()
             capture("prog-path")
-            compose.onAllNodesWithText("内科")[1].performScrollTo().performClick()
+            compose.onNode(hasText("内科") and hasClickAction()).performScrollTo().performClick()
             compose.onNodeWithText("诊断学（常见症状与体格检查）").performScrollTo().assertIsDisplayed()
             capture("prog-med")
-            compose.onAllNodesWithText("人文")[1].performScrollTo().performClick()
+            compose.onNode(hasText("人文") and hasClickAction()).performScrollTo().performClick()
             compose.onNodeWithText("卫生法律法规").performScrollTo().assertIsDisplayed()
             capture("prog-humanities")
+
+            compose.onNodeWithText("今日").performClick()
+            compose.waitForIdle()
+            lateinit var stateBeforeForecast: JSONObject
+            compose.runOnIdle { stateBeforeForecast = model.state.copyJson() }
+            compose.runOnIdle {
+                model.state.obj("ch").put("phys", JSONArray((0 until 12).map { it < 5 }))
+                model.state.obj("cf").put("phys", "2026-10-20")
+                val start = LocalDate.parse("2026-10-27")
+                repeat(14) { offset ->
+                    model.state.obj("days").put(
+                        start.plusDays(offset.toLong()).toString(),
+                        JSONObject().put("w", JSONObject().put("n", 45)).put("h", 2.0),
+                    )
+                }
+            }
+            compose.onNodeWithText("进度").performClick()
+            compose.waitForIdle()
+            compose.onNodeWithText("学习进度预测").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("生理：约 12月9日 学完", substring = true).assertIsDisplayed()
+            compose.onNodeWithText("预计 1月28日 过完第一轮", substring = true).assertIsDisplayed()
+            capture("prog-forecast-estimated")
+            compose.runOnIdle {
+                val state = model.state
+                state.keys().asSequence().toList().forEach(state::remove)
+                stateBeforeForecast.keys().forEach { state.put(it, stateBeforeForecast.get(it)) }
+            }
+            compose.onNodeWithText("今日").performClick()
 
             CheckinCore.clock = Clock.fixed(Instant.parse("2027-01-20T13:30:00Z"), CheckinCore.shanghai)
             compose.runOnIdle { model.resume() }
@@ -168,6 +207,12 @@ class ScreenshotTest {
             compose.onNodeWithText("统计").performClick()
             compose.onNodeWithText("近 8 周学习时长（橙=未达目标）").performScrollTo().assertIsDisplayed()
             capture("winter-stats")
+            compose.runOnIdle { model.notify("示例提示：已保存学习记录") }
+            compose.onNodeWithText("示例提示：已保存学习记录").assertIsDisplayed()
+            compose.onNodeWithText("撤销").assertDoesNotExist()
+            capture("notice-snackbar")
+            compose.onNodeWithText("今日").performClick()
+            capture("tabbar")
         }
     }
 }

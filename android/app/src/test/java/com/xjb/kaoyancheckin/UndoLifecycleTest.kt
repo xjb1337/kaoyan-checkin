@@ -10,7 +10,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.Lifecycle
-import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import java.time.Clock
 import java.time.Instant
@@ -23,6 +22,7 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Before
+import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -37,6 +37,7 @@ import org.robolectric.annotation.GraphicsMode
 class UndoLifecycleTest {
     @get:Rule val compose = createEmptyComposeRule()
     private lateinit var app: Application
+    private lateinit var database: TestDatabase
     private lateinit var previousClock: Clock
     private val date = "2026-11-10"
 
@@ -45,14 +46,16 @@ class UndoLifecycleTest {
         previousClock = CheckinCore.clock
         CheckinCore.clock = Clock.fixed(Instant.parse("2026-11-10T04:00:00Z"), CheckinCore.shanghai)
         UpdateServices.backendOverride = NoNetworkUpdateBackend
-        CheckinRepository.reset()
-        app.deleteDatabase("checkin.db")
-        check(!app.getDatabasePath("checkin.db").exists()) { "无法重置测试数据库" }
+        database = TestDatabase(app)
+        WidgetNotice.take(app)
     }
 
     @After fun tearDown() {
-        CheckinCore.clock = previousClock
-        UpdateServices.backendOverride = null
+        try { database.close() } finally {
+            WidgetNotice.take(app)
+            CheckinCore.clock = previousClock
+            UpdateServices.backendOverride = null
+        }
     }
 
     private fun widgetToggle() {
@@ -89,7 +92,7 @@ class UndoLifecycleTest {
     @Test fun widgetActionsAreUndoableOnOpenAndInForegroundAndExpireInBackground() {
         // Simulate a completed widget write before the Activity or its ViewModel exists.
         widgetToggle()
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        database.launchActivity().use { scenario ->
             lateinit var model: CheckinViewModel
             scenario.onActivity { model = ViewModelProvider(it)[CheckinViewModel::class.java] }
             waitForSnackbar(model)
@@ -123,6 +126,42 @@ class UndoLifecycleTest {
             }
             compose.waitForIdle()
             compose.onNodeWithText("撤销").assertDoesNotExist()
+        }
+    }
+
+    @Test fun ordinaryNoticeDoesNotDismissOrStealTheUndoAction() {
+        database.launchActivity().use { scenario ->
+            lateinit var model: CheckinViewModel
+            scenario.onActivity { model = ViewModelProvider(it)[CheckinViewModel::class.java] }
+            compose.waitUntil(timeoutMillis = 15_000) { model.ready }
+            compose.runOnIdle { model.toggleTask(date, "words") }
+            waitForSnackbar(model)
+            val token = checkNotNull(model.pendingUndo).token
+            compose.runOnIdle { model.notify("示例普通提示") }
+            compose.onNodeWithText("示例普通提示").assertIsDisplayed()
+            compose.onNodeWithText("撤销").assertIsDisplayed()
+            assertEquals(1, compose.onAllNodesWithText("撤销").fetchSemanticsNodes().size)
+            assertEquals(token, model.pendingUndo?.token)
+            compose.onNodeWithText("撤销").performClick()
+            compose.waitUntil(timeoutMillis = 15_000) {
+                shadowOf(Looper.getMainLooper()).idle()
+                !model.plan.isDone(model.state.obj("days").optJSONObject(date), "words") && !model.state.has("_undo")
+            }
+            compose.onNodeWithText("示例普通提示").assertIsDisplayed()
+        }
+    }
+
+    @Test fun widgetFailureSurvivesUntilAppOpenAndUsesAnOrdinarySnackbar() {
+        WidgetNotice.post(app, "示例小组件保存失败")
+        database.launchActivity().use { scenario ->
+            lateinit var model: CheckinViewModel
+            scenario.onActivity { model = ViewModelProvider(it)[CheckinViewModel::class.java] }
+            compose.waitUntil(timeoutMillis = 15_000) { model.ready }
+            compose.onNodeWithText("示例小组件保存失败").assertIsDisplayed()
+            compose.onNodeWithText("撤销").assertDoesNotExist()
+            assertNull(WidgetNotice.peek(app))
+            compose.runOnIdle { WidgetNotice.post(app, "示例前台小组件失败") }
+            assertNull(WidgetNotice.peek(app))
         }
     }
 }

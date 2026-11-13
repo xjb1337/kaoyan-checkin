@@ -13,7 +13,6 @@ import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.RemoteViews
-import android.widget.Toast
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import com.xjb.kaoyancheckin.ui.theme.AppTheme
@@ -126,9 +125,10 @@ class CheckinWidget : AppWidgetProvider() {
             views.setImageViewBitmap(R.id.widget_header_bg, WidgetArtwork.header(width, density, c, status, snapshot?.satisfied == true))
             views.setImageViewBitmap(R.id.widget_streak_bg, WidgetArtwork.badge(density, c))
             views.setTextViewText(R.id.widget_streak, snapshot?.let { "连续 ${it.streak} 天" } ?: "打开应用")
-            views.setTextViewText(R.id.widget_summary, status.summary)
+            val notice = WidgetNotice.peek(context)
+            views.setTextViewText(R.id.widget_summary, notice ?: status.summary)
             views.setTextColor(R.id.widget_title, c.text.toArgb())
-            val summaryColor = if (snapshot?.satisfied == true) {
+            val summaryColor = if (notice != null) c.red else if (snapshot?.satisfied == true) {
                 if (dark) c.greenTag else Color(0xFF047857)
             } else c.text
             views.setTextColor(R.id.widget_summary, summaryColor.toArgb())
@@ -186,9 +186,7 @@ class WidgetActionReceiver : BroadcastReceiver() {
                 val plan = StudyPlan(JSONObject(context.assets.open("plan.json").bufferedReader().use { it.readText() }))
                 toggleWidgetTask(CheckinRepository.get(context), plan, date, id)
             } catch (e: Exception) {
-                kotlinx.coroutines.withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "小组件未保存，请打开应用检查存档", Toast.LENGTH_LONG).show()
-                }
+                WidgetNotice.post(context, "小组件未保存，请打开应用检查存档")
             } finally {
                 try { CheckinWidget.refreshAll(context) } finally { pending.finish() }
             }

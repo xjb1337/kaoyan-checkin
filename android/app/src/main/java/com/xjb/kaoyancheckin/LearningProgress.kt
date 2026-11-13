@@ -64,5 +64,8 @@ internal fun toggleChapter(state: JSONObject, subject: JSONObject, index: Int, t
     if (before < total && after == total) completed.put(key, today)
     if (after < total) completed.remove(key)
     state.put("cf", first).put("ce", completed)
+    val dates = state.obj("cd").optJSONObject(key) ?: JSONObject()
+    if (flags.optBoolean(index)) dates.put(index.toString(), today) else dates.remove(index.toString())
+    if (dates.length() == 0) state.obj("cd").remove(key) else state.obj("cd").put(key, dates)
     return state
 }

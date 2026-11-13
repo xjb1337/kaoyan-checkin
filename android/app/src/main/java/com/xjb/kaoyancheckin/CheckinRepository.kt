@@ -9,28 +9,37 @@ import kotlinx.coroutines.withContext
 internal object CheckinRepository {
     private const val DATABASE_NAME = "checkin.db"
 
-    @Volatile private var store: DocumentStore? = null
-    @Volatile private var database: CheckinDatabase? = null
+    @Volatile private var connection: Connection? = null
 
-    fun get(context: Context): DocumentStore = store ?: synchronized(this) {
-        store ?: create(context.applicationContext).also { store = it }
-    }
+    fun get(context: Context): DocumentStore = (connection ?: synchronized(this) {
+        connection ?: Connection(context.applicationContext).also { connection = it }
+    }).store
 
-    private fun create(context: Context): DocumentStore {
-        val db = Room.databaseBuilder(context, CheckinDatabase::class.java, DATABASE_NAME).build()
-        database = db
-        return DocumentStore(
-            readRaw = { withContext(Dispatchers.IO) { db.document().read() } },
-            writeRaw = { json -> withContext(Dispatchers.IO) { db.document().write(CheckinDocument(json = json)) } },
+    private class Connection(context: Context) {
+        private val database = Room.databaseBuilder(context, CheckinDatabase::class.java, DATABASE_NAME).build()
+        private var closed = false
+        val store = DocumentStore(
+            readRaw = { access { it.readBlocking() } },
+            writeRaw = { json -> access { it.writeBlocking(CheckinDocument(json = json)) } },
         )
+
+        private suspend fun <T> access(block: (CheckinDao) -> T): T = withContext(Dispatchers.IO) {
+            synchronized(this@Connection) {
+                check(!closed) { "数据库连接已重置" }
+                block(database.document())
+            }
+        }
+
+        @Synchronized fun close() {
+            closed = true
+            database.close()
+        }
     }
 
     /** Closes the process-wide connection so tests can delete or reseed the database file. */
     @Synchronized
     internal fun reset() {
-        val db = database
-        database = null
-        store = null
-        db?.close()
+        connection?.close()
+        connection = null
     }
 }

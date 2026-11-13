@@ -11,8 +11,8 @@ android {
         applicationId = "com.xjb.kaoyancheckin"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.0.0"
+        versionCode = 7
+        versionName = "1.1.0"
     }
     // CI supplies all four values; without them release uses the same local debug identity.
     val signingValues = listOf("SIGNING_STORE_FILE", "SIGNING_STORE_PASSWORD", "SIGNING_KEY_ALIAS", "SIGNING_KEY_PASSWORD")
@@ -56,9 +56,15 @@ tasks.withType<Test>().configureEach {
         listOf("http.proxyHost", "http.proxyPort", "https.proxyHost", "https.proxyPort").forEach { name ->
             providers.systemProperty(name).orNull?.let { systemProperty(name, it) }
         }
+        forkEvery = 1L
         outputs.upToDateWhen { false }
     } else {
-        exclude("**/ScreenshotTest.class", "**/WidgetScreenshotTest.class")
+        exclude(
+            "**/ScreenshotTest.class",
+            "**/WidgetScreenshotTest.class",
+            "**/IconRenderTest.class",
+            "**/SnackbarThemeScreenshotTest.class",
+        )
     }
 }
 
@@ -71,7 +77,6 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")

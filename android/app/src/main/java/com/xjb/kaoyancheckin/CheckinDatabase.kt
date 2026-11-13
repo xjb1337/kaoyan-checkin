@@ -15,6 +15,12 @@ data class CheckinDocument(@PrimaryKey val id: Int = 1, val json: String)
 @Dao
 interface CheckinDao {
     @Query("SELECT json FROM document WHERE id = 1")
+    fun readBlocking(): String?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    fun writeBlocking(document: CheckinDocument)
+
+    @Query("SELECT json FROM document WHERE id = 1")
     suspend fun read(): String?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

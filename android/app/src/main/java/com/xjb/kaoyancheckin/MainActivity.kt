@@ -1,35 +1,32 @@
 package com.xjb.kaoyancheckin
 
-import android.graphics.Color as AndroidColor
+import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.content.Intent
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
 import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.Snackbar
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -48,8 +45,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.auto(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.auto(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT),
+            statusBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
         )
         if (CheckinWidget.isOpenToday(intent)) openTodaySignal++
         val themeFactory = ThemeViewModel.factory(application)
@@ -58,7 +55,17 @@ class MainActivity : ComponentActivity() {
             val model: CheckinViewModel = viewModel()
             val updates: UpdateViewModel = viewModel()
             val appearance: ThemeViewModel = viewModel(factory = themeFactory)
-            WebTheme(theme = appearance.theme) { CheckinApp(openTodaySignal, model, updates, appearance) }
+            WebTheme(theme = appearance.theme) {
+                val colors = webColors
+                SideEffect {
+                    window.setBackgroundDrawable(ColorDrawable(colors.bg.toArgb()))
+                    enableEdgeToEdge(
+                        statusBarStyle = SystemBarStyle.auto(colors.bg.toArgb(), colors.bg.toArgb()) { colors.dark },
+                        navigationBarStyle = SystemBarStyle.auto(colors.card.toArgb(), colors.card.toArgb()) { colors.dark },
+                    )
+                }
+                CheckinApp(openTodaySignal, model, updates, appearance)
+            }
         }
     }
     override fun onNewIntent(intent: Intent) {
@@ -73,6 +80,31 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
     val context = androidx.compose.ui.platform.LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val snackbar = remember { SnackbarHostState() }
+    val notices = remember { SnackbarHostState() }
+    DisposableEffect(context, lifecycle, model) {
+        fun deliverWidgetNotice() {
+            if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                WidgetNotice.take(context)?.let { message ->
+                    model.notify(message)
+                    CheckinWidget.refreshAll(context)
+                }
+            }
+        }
+        val preferences = WidgetNotice.preferences(context)
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == WidgetNotice.MESSAGE) deliverWidgetNotice()
+        }
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) deliverWidgetNotice()
+        }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+        lifecycle.addObserver(observer)
+        deliverWidgetNotice()
+        onDispose {
+            preferences.unregisterOnSharedPreferenceChangeListener(listener)
+            lifecycle.removeObserver(observer)
+        }
+    }
     DisposableEffect(lifecycle, model) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -85,10 +117,10 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
         onDispose { model.flushDrafts(); lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(openTodaySignal) {
-        if (openTodaySignal > 0) { model.page = 0; model.selected = CheckinCore.today() }
+        if (openTodaySignal > 0) { model.page = 0; model.selected = model.currentDay() }
     }
-    UpdateDialog(updates)
-    LaunchedEffect(model) { model.events.collect { Toast.makeText(context, it, Toast.LENGTH_LONG).show() } }
+    UpdateDialog(updates, model::notify)
+    LaunchedEffect(model) { model.events.collect { notices.showSnackbar(it) } }
     LaunchedEffect(model, lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             snapshotFlow { model.pendingUndo }.collectLatest { step ->
@@ -107,7 +139,10 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
         }
     }
     LaunchedEffect(lifecycle) {
-        while (true) { delay(30_000); if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) model.resume() }
+        while (true) {
+            delay(CheckinCore.todayRefreshDelayMillis())
+            if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) model.resume()
+        }
     }
     val c = webColors
     Column(Modifier.fillMaxSize().background(c.bg).imePadding()
@@ -137,10 +172,9 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
                     }
                 }
             }
-            SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).widthIn(max = 540.dp).fillMaxWidth()) { data ->
-                val shape = RoundedCornerShape(10.dp)
-                Snackbar(data, Modifier.padding(horizontal = 12.dp, vertical = 8.dp).border(1.dp, c.line, shape),
-                    shape = shape, containerColor = c.card, contentColor = c.text, actionColor = c.accent)
+            Column(Modifier.align(Alignment.BottomCenter).widthIn(max = 540.dp).fillMaxWidth()) {
+                UndoSnackbarHost(notices)
+                UndoSnackbarHost(snackbar)
             }
         }
         TabBar(model.page) { model.page = it }
@@ -170,11 +204,11 @@ private fun Header(model: CheckinViewModel) {
     }
 }
 
-// Web .tabbar / .tb: six equal emoji tabs without a Material indicator.
 @Composable
-private fun TabBar(selected: Int, onSelect: (Int) -> Unit) {
+internal fun TabBar(selected: Int, onSelect: (Int) -> Unit) {
     val labels = listOf("今日", "进度", "周目标", "统计", "节点", "设置")
-    val emoji = listOf("📋", "📈", "🎯", "📊", "🚩", "⚙️")
+    val icons = listOf(R.drawable.tab_today, R.drawable.tab_progress, R.drawable.tab_week,
+        R.drawable.tab_stats, R.drawable.tab_milestones, R.drawable.tab_settings)
     val c = webColors
     Column(Modifier.fillMaxWidth().background(c.card), horizontalAlignment = Alignment.CenterHorizontally) {
         Divider()
@@ -183,7 +217,8 @@ private fun TabBar(selected: Int, onSelect: (Int) -> Unit) {
                 Column(Modifier.weight(1f).heightIn(min = 54.dp).selectable(selected == index, role = Role.Tab, onClick = { onSelect(index) })
                     .padding(top = 7.dp, bottom = 5.dp), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(1.dp, Alignment.CenterVertically)) {
-                    Text(emoji[index], fontSize = 18.sp, lineHeight = 22.sp, textAlign = TextAlign.Center)
+                    Icon(painterResource(icons[index]), contentDescription = null, Modifier.size(22.dp),
+                        tint = if (selected == index) c.accent else c.sub)
                     Text(label, color = if (selected == index) c.accent else c.sub, fontSize = 11.sp,
                         lineHeight = 16.sp, fontWeight = if (selected == index) FontWeight.Bold else FontWeight.Normal, maxLines = 1)
                 }
