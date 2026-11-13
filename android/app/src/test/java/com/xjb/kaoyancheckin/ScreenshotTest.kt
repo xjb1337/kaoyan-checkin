@@ -18,9 +18,11 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import java.io.File
 import java.time.Clock
 import java.time.Instant
+import java.time.LocalDate
 import java.util.TimeZone
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -101,7 +103,9 @@ class ScreenshotTest {
                 check(model.loadError.isEmpty()) { model.loadError }
                 check(model.today == "2026-11-09")
                 val today = model.state.obj("days").obj("2026-11-09")
-                check(today.optDouble("h") == 2.5 && today.obj("t").optBoolean("words"))
+                check(today.optDouble("h") == 2.5 && today.obj("t").optBoolean("words")) {
+                    "Screenshot seed was not loaded: ${model.state}"
+                }
                 val week = model.state.obj("weeks").obj("2026-11-09")
                 check(week.arr("must").optString(0) == "生理第1–3章网课+讲义")
             }
@@ -122,16 +126,22 @@ class ScreenshotTest {
             }
 
             compose.onNodeWithText("今日").performClick()
+            compose.onNodeWithContentDescription("查看学习进度预测").assertIsDisplayed()
             compose.onNodeWithContentDescription("新词 数量").performScrollTo().assertIsDisplayed()
             capture("today-words")
+            compose.onNodeWithText("阶段计划与安装帮助").performScrollTo().assertIsDisplayed()
             compose.runOnIdle { model.toggleTask(model.today, "words") }
             compose.waitUntil(timeoutMillis = 15_000) {
                 compose.onAllNodesWithText("撤销").fetchSemanticsNodes().isNotEmpty()
             }
+            capture("today-undo-overlap")
+            compose.onNodeWithContentDescription("新词 数量").performScrollTo().assertIsDisplayed()
             capture("today-undo")
             compose.onNodeWithText("撤销").performClick()
 
             compose.onNodeWithText("进度").performClick()
+            compose.onNodeWithText("学习进度预测").performScrollTo().assertIsDisplayed()
+            capture("prog-forecast")
             compose.onNodeWithText("0/15").performScrollTo().assertIsDisplayed()
             compose.onAllNodesWithText("0/9").assertCountEquals(2)
             compose.onNodeWithText("0/4").performScrollTo().assertIsDisplayed()
@@ -148,6 +158,34 @@ class ScreenshotTest {
             compose.onAllNodesWithText("人文")[1].performScrollTo().performClick()
             compose.onNodeWithText("卫生法律法规").performScrollTo().assertIsDisplayed()
             capture("prog-humanities")
+
+            compose.onNodeWithText("今日").performClick()
+            compose.waitForIdle()
+            lateinit var stateBeforeForecast: JSONObject
+            compose.runOnIdle { stateBeforeForecast = model.state.copyJson() }
+            compose.runOnIdle {
+                model.state.obj("ch").put("phys", JSONArray((0 until 12).map { it < 5 }))
+                model.state.obj("cf").put("phys", "2026-10-20")
+                val start = LocalDate.parse("2026-10-27")
+                repeat(14) { offset ->
+                    model.state.obj("days").put(
+                        start.plusDays(offset.toLong()).toString(),
+                        JSONObject().put("w", JSONObject().put("n", 45)).put("h", 2.0),
+                    )
+                }
+            }
+            compose.onNodeWithText("进度").performClick()
+            compose.waitForIdle()
+            compose.onNodeWithText("学习进度预测").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("生理：约 12月9日 学完", substring = true).assertIsDisplayed()
+            compose.onNodeWithText("预计 1月28日 过完第一轮", substring = true).assertIsDisplayed()
+            capture("prog-forecast-estimated")
+            compose.runOnIdle {
+                val state = model.state
+                state.keys().asSequence().toList().forEach(state::remove)
+                stateBeforeForecast.keys().forEach { state.put(it, stateBeforeForecast.get(it)) }
+            }
+            compose.onNodeWithText("今日").performClick()
 
             CheckinCore.clock = Clock.fixed(Instant.parse("2027-01-20T13:30:00Z"), CheckinCore.shanghai)
             compose.runOnIdle { model.resume() }

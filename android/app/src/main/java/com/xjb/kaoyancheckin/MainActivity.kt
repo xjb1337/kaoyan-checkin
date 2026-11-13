@@ -9,18 +9,14 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.Snackbar
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
@@ -137,11 +133,10 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
                     }
                 }
             }
-            SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).widthIn(max = 540.dp).fillMaxWidth()) { data ->
-                val shape = RoundedCornerShape(10.dp)
-                Snackbar(data, Modifier.padding(horizontal = 12.dp, vertical = 8.dp).border(1.dp, c.line, shape),
-                    shape = shape, containerColor = c.card, contentColor = c.text, actionColor = c.accent)
-            }
+            UndoSnackbarHost(
+                snackbar,
+                Modifier.align(Alignment.BottomCenter).widthIn(max = 540.dp).fillMaxWidth(),
+            )
         }
         TabBar(model.page) { model.page = it }
     }

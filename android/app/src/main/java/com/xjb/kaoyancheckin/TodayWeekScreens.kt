@@ -16,12 +16,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xjb.kaoyancheckin.ui.theme.webColors
 import org.json.JSONObject
+import java.time.LocalDate
 import kotlin.math.roundToInt
 
 internal data class WeekStats(val rate: Int, val days: Int, val elapsed: Int, val hours: Double, val target: Double)
@@ -73,6 +76,15 @@ internal fun TodayScreen(model: CheckinViewModel) {
     if (model.today < model.plan.start) Banner("🎯 ${shortDate(model.plan.start)} 正式开营，还有 ${daysBetween(model.today, model.plan.start)} 天 · 想提前开始也行", "info")
     if (CheckinCore.needsBackup(state, System.currentTimeMillis())) {
         Banner("💾 记得备份到手机外 ·", "info") { WebButton("去备份", { model.page = 5 }) }
+    }
+    if (isToday && model.loadError.isEmpty()) {
+        Tip(
+            forecastSummary(model.plan, state, LocalDate.parse(model.today)) + " ›",
+            Modifier.fillMaxWidth()
+                .clickable(role = Role.Button) { model.page = 1 }
+                .semantics { contentDescription = "查看学习进度预测" }
+                .padding(vertical = 4.dp),
+        )
     }
     val maximum = if (phase.optInt("fs") == 1) 1 else 2
     val met = model.plan.satisfied(date, state)

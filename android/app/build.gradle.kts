@@ -56,9 +56,15 @@ tasks.withType<Test>().configureEach {
         listOf("http.proxyHost", "http.proxyPort", "https.proxyHost", "https.proxyPort").forEach { name ->
             providers.systemProperty(name).orNull?.let { systemProperty(name, it) }
         }
+        forkEvery = 1L
         outputs.upToDateWhen { false }
     } else {
-        exclude("**/ScreenshotTest.class", "**/WidgetScreenshotTest.class")
+        exclude(
+            "**/ScreenshotTest.class",
+            "**/WidgetScreenshotTest.class",
+            "**/IconRenderTest.class",
+            "**/SnackbarThemeScreenshotTest.class",
+        )
     }
 }
 

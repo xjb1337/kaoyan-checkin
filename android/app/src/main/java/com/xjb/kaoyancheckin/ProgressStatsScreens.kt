@@ -46,6 +46,23 @@ internal fun ProgressScreen(model: CheckinViewModel) {
     val enabled = model.loadError.isEmpty()
     var deleteScoreId by remember { mutableStateOf<String?>(null) }
     val words = wordProgress(model.state, model.today)
+    val todayDate = LocalDate.parse(model.today)
+    val examDate = LocalDate.parse(model.plan.exam(model.state))
+    val wordForecast = forecastWords(model.state, todayDate, exam = examDate)
+    val subjectForecasts = model.plan.subjects.map { forecastSubject(it, model.state, todayDate) }
+    val hoursForecast = forecastHours(model.state, model.plan, todayDate)
+    Section("学习进度预测") {
+        ForecastRow(formatWordsForecast(wordForecast), wordForecast.tone, wordForecastStatus(wordForecast))
+        subjectForecasts.filterNot { it is SubjectForecast.NotStarted }.forEach { forecast ->
+            ForecastRow(formatSubjectForecast(forecast), forecast.tone, subjectForecastStatus(forecast))
+        }
+        formatUpcomingSubjects(subjectForecasts)?.let { text ->
+            ForecastRow(text, ForecastTone.NEUTRAL, "未开始")
+        }
+        ForecastRow(formatHoursForecast(hoursForecast), hoursForecast.tone, hoursForecastStatus(hoursForecast))
+        Spacer(Modifier.height(8.dp))
+        Tip("按近 ${FORECAST_WINDOW_DAYS} 天实际速度推算，章节按首次勾选以来的平均速度；记录太少时不预测")
+    }
     Section("单词第一轮") {
         Text("累计已背 ${words.total} / ${words.goal}", fontWeight = FontWeight.SemiBold, color = c.text)
         Spacer(Modifier.height(8.dp))
@@ -213,6 +230,50 @@ internal fun ProgressScreen(model: CheckinViewModel) {
             }
         }
     }
+}
+
+@Composable
+private fun ForecastRow(text: String, tone: ForecastTone, status: String) {
+    val c = webColors
+    val (color, background) = when (tone) {
+        ForecastTone.GOOD -> c.green to c.chipGreen
+        ForecastTone.BAD -> c.red to c.chipRed
+        ForecastTone.NEUTRAL -> c.sub to c.bg
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(text, Modifier.weight(1f), color = color, fontSize = 12.5.sp, lineHeight = 19.sp)
+        Chip(status, color, background)
+    }
+}
+
+private fun wordForecastStatus(forecast: WordForecast): String = when (forecast) {
+    is WordForecast.Completed -> "已完成"
+    is WordForecast.Insufficient -> "数据不足"
+    is WordForecast.Estimated -> when {
+        forecast.planDeltaDays < 0 -> "提前"
+        forecast.planDeltaDays > 0 -> "落后"
+        else -> "按计划"
+    }
+}
+
+private fun subjectForecastStatus(forecast: SubjectForecast): String = when (forecast) {
+    is SubjectForecast.NotStarted -> "未开始"
+    is SubjectForecast.Completed -> "已完成"
+    is SubjectForecast.Insufficient -> "数据不足"
+    is SubjectForecast.Estimated -> when {
+        forecast.planDeltaDays < 0 -> "提前"
+        forecast.planDeltaDays > 0 -> "落后"
+        else -> "按计划"
+    }
+}
+
+private fun hoursForecastStatus(forecast: HoursForecast): String = when (forecast) {
+    is HoursForecast.Insufficient -> "数据不足"
+    is HoursForecast.Estimated -> if (forecast.achievementRate >= 100.0) "达标" else "未达标"
 }
 
 @Composable
