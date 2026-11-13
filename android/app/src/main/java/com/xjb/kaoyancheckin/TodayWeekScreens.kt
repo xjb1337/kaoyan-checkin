@@ -24,7 +24,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xjb.kaoyancheckin.ui.theme.webColors
 import org.json.JSONObject
-import java.time.LocalDate
 import kotlin.math.roundToInt
 
 internal data class WeekStats(val rate: Int, val days: Int, val elapsed: Int, val hours: Double, val target: Double)
@@ -61,11 +60,12 @@ internal fun weekStats(plan: StudyPlan, state: JSONObject, today: String, week: 
 internal fun TodayScreen(model: CheckinViewModel) {
     val state = model.state
     val date = model.selected
-    val record = state.obj("days").optJSONObject(date) ?: StudyPlan.day()
-    val phase = model.plan.phase(date, state)
+    val today = model.today
+    val record = remember(state, date) { state.obj("days").optJSONObject(date) ?: StudyPlan.day() }
+    val phase = remember(model.plan, state, date, today) { model.plan.phase(date, state) }
     val enabled = date <= model.today && model.loadError.isEmpty()
     val isToday = date == model.today
-    val tasks = model.plan.tasks(date, state, model.today)
+    val tasks = remember(model.plan, state, date, today) { model.plan.tasks(date, state, today) }
     val nextDate = StudyPlan.nextWithinLimit(date, model.today, 1)
     var deleteTarget by remember(date) { mutableStateOf<String?>(null) }
     DateNav(date, { model.selected = StudyPlan.addDays(date, -1) }, { nextDate?.let { model.selected = it } },
@@ -79,7 +79,7 @@ internal fun TodayScreen(model: CheckinViewModel) {
     }
     if (isToday && model.loadError.isEmpty()) {
         Tip(
-            forecastSummary(model.plan, state, LocalDate.parse(model.today)) + " ›",
+            rememberTodayForecast(model.plan, state, today) + " ›",
             Modifier.fillMaxWidth()
                 .clickable(role = Role.Button) { model.page = 1 }
                 .semantics { contentDescription = "查看学习进度预测" }
@@ -87,7 +87,7 @@ internal fun TodayScreen(model: CheckinViewModel) {
         )
     }
     val maximum = if (phase.optInt("fs") == 1) 1 else 2
-    val met = model.plan.satisfied(date, state)
+    val met = remember(model.plan, state, date, today) { model.plan.satisfied(date, state) }
     when {
         date < model.plan.start && (date >= model.today || state.obj("days").optJSONObject(date) == null) ->
             Banner("计划从 ${model.plan.start} 开始，之前不计欠打卡。", "info")
@@ -195,7 +195,7 @@ internal fun WeekScreen(model: CheckinViewModel) {
     val currentWeek = StudyPlan.monday(model.today)
     val record = model.state.obj("weeks").optJSONObject(week) ?: StudyPlan.week()
     val enabled = week <= currentWeek && model.loadError.isEmpty()
-    val stats = weekStats(model.plan, model.state, model.today, week)
+    val stats = remember(model.plan, model.state, model.today, week) { weekStats(model.plan, model.state, model.today, week) }
     val nextWeek = StudyPlan.nextWithinLimit(week, currentWeek, 7)
     DateNav(week, { model.week = StudyPlan.addDays(week, -7) }, { nextWeek?.let { model.week = it } },
         { model.week = currentWeek }, "本周", week == currentWeek, false, canGoNext = nextWeek != null)

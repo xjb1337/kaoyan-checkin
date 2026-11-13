@@ -55,7 +55,7 @@ internal fun undoSnackbarColors(palette: WebColors): UndoSnackbarColors =
 @Composable
 internal fun UndoSnackbar(
     message: String,
-    actionLabel: String = "撤销",
+    actionLabel: String? = "撤销",
     onAction: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -80,8 +80,10 @@ internal fun UndoSnackbar(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
-        TextButton(onClick = onAction, modifier = Modifier.heightIn(min = 44.dp)) {
-            Text(actionLabel, color = colors.action, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        if (actionLabel != null) {
+            TextButton(onClick = onAction, modifier = Modifier.heightIn(min = 44.dp)) {
+                Text(actionLabel, color = colors.action, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
@@ -105,7 +107,7 @@ internal fun UndoSnackbarHost(hostState: SnackbarHostState, modifier: Modifier =
         ) {
             UndoSnackbar(
                 message = data.visuals.message,
-                actionLabel = data.visuals.actionLabel ?: "撤销",
+                actionLabel = data.visuals.actionLabel,
                 onAction = { data.performAction() },
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             )

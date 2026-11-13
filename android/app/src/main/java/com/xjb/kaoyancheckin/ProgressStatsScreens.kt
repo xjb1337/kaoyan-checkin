@@ -35,7 +35,6 @@ import androidx.compose.ui.unit.sp
 import com.xjb.kaoyancheckin.ui.theme.webColors
 import org.json.JSONArray
 import org.json.JSONObject
-import java.time.LocalDate
 import java.util.UUID
 import kotlin.math.roundToInt
 
@@ -45,12 +44,11 @@ internal fun ProgressScreen(model: CheckinViewModel) {
     val c = webColors
     val enabled = model.loadError.isEmpty()
     var deleteScoreId by remember { mutableStateOf<String?>(null) }
-    val words = wordProgress(model.state, model.today)
-    val todayDate = LocalDate.parse(model.today)
-    val examDate = LocalDate.parse(model.plan.exam(model.state))
-    val wordForecast = forecastWords(model.state, todayDate, exam = examDate)
-    val subjectForecasts = model.plan.subjects.map { forecastSubject(it, model.state, todayDate) }
-    val hoursForecast = forecastHours(model.state, model.plan, todayDate)
+    val calculations = rememberProgressCalculations(model.plan, model.state, model.today)
+    val words = calculations.words
+    val wordForecast = calculations.wordForecast
+    val subjectForecasts = calculations.subjectForecasts
+    val hoursForecast = calculations.hoursForecast
     Section("学习进度预测") {
         ForecastRow(formatWordsForecast(wordForecast), wordForecast.tone, wordForecastStatus(wordForecast))
         subjectForecasts.filterNot { it is SubjectForecast.NotStarted }.forEach { forecast ->
@@ -72,40 +70,34 @@ internal fun ProgressScreen(model: CheckinViewModel) {
         Tip("今日新词 ${words.todayNew} · 复习 ${words.todayReview} · 距第一轮还剩 ${words.remaining}")
     }
     Section("计划 vs 实际（按计划线性推进）") {
-        var anyChapter = false
-        model.plan.subjects.forEach { subject ->
-            val start = subject.getString("s")
-            val end = subject.getString("e")
-            val total = subject.arr("ch").length()
-            val done = model.plan.chapterDone(subject, model.state)
-            anyChapter = anyChapter || done > 0
-            val expected = when {
-                model.today < start -> 0
-                model.today >= end -> total
-                else -> (daysBetween(start, model.today).toDouble() / daysBetween(start, end).coerceAtLeast(1) * total).roundToInt()
-            }
-            val diff = done - expected
+        calculations.planned.filterNot { it.upcoming }.forEach { progress ->
+            val subject = progress.subject
+            val total = progress.total
+            val done = progress.done
+            val expected = progress.expected
+            val diff = progress.difference
             val (status, color, bg) = when {
-                model.today < start -> Triple("未开始", c.amber, c.chipOrange)
-                diff > 0 -> Triple("领先 $diff", c.green, Color(0xFF16A34A).copy(alpha = .14f))
-                diff < 0 -> Triple("落后 ${-diff}", c.red, Color(0xFFEF4444).copy(alpha = .13f))
-                else -> Triple("正常", c.green, Color(0xFF16A34A).copy(alpha = .14f))
+                diff > 0 -> Triple("领先 $diff", c.green, c.chipGreen)
+                diff < 0 -> Triple("落后 ${-diff}", c.red, c.chipRed)
+                else -> Triple("正常", c.green, c.chipGreen)
             }
-            val barColor = when { model.today < start -> c.orange; diff < 0 -> Color(0xFFEF4444); else -> Color(0xFF16A34A) }
+            val barColor = if (diff < 0) c.red else c.green
             BarRow(subject.getString("name"), "$done/$total", if (total == 0) 0f else done.toFloat() / total, barColor)
             Row(Modifier.padding(start = 52.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("计划应完成 $expected 章 ·", fontSize = 12.sp, color = c.sub)
                 Chip(status, color, bg)
             }
         }
-        if (!anyChapter) Tip("还没有勾选章节。下面展开每科，学完一章点一下。")
+        formatUnstartedSubjects(calculations.planned)?.let { Tip(it) }
+        if (calculations.planned.none { it.done > 0 }) Tip("还没有勾选章节。下面展开每科，学完一章点一下。")
     }
     Section("章节进度") {
-        model.plan.subjects.forEach { subject ->
+        calculations.planned.forEach { progress ->
+            val subject = progress.subject
             val subjectKey = subject.getString("k")
             val chapters = subject.arr("ch")
             val flags = model.state.obj("ch").arr(subjectKey)
-            val done = model.plan.chapterDone(subject, model.state)
+            val done = progress.done
             var expanded by rememberSaveable(subjectKey) { mutableStateOf(false) }
             Row(Modifier.fillMaxWidth().heightIn(min = 58.dp).clickable { expanded = !expanded }.padding(horizontal = 2.dp, vertical = 11.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -113,10 +105,7 @@ internal fun ProgressScreen(model: CheckinViewModel) {
                 Text("$done/${chapters.length()} 章", fontSize = 11.5.sp, color = c.sub, fontWeight = FontWeight.SemiBold, maxLines = 1)
                 Chip("${subject.getString("s").substring(5)}~${subject.getString("e").substring(5)}", c.accent, c.chipBlue)
             }
-            val firstDate = model.state.obj("cf").optString(subjectKey).takeIf(CheckinCore::validDate)?.let(LocalDate::parse)
-            val completionDate = model.state.obj("ce").optString(subjectKey).takeIf(CheckinCore::validDate)?.let(LocalDate::parse)
-            Text(chapterEstimate(LocalDate.parse(model.today), LocalDate.parse(subject.getString("s")),
-                LocalDate.parse(subject.getString("e")), done, chapters.length(), firstDate, completionDate),
+            Text(progress.estimate,
                 Modifier.padding(start = 2.dp, bottom = 10.dp), color = c.sub, fontSize = 12.sp, lineHeight = 18.sp)
             if (expanded) chapters.values().forEachIndexed { index, chapter ->
                 val checked = flags.optBoolean(index)
@@ -134,7 +123,7 @@ internal fun ProgressScreen(model: CheckinViewModel) {
         }
     }
     Section("模考 / 真题套卷成绩") {
-        val scores = model.state.arr("scores").values().map { it as JSONObject }.sortedBy { it.getString("d") }
+        val scores = calculations.scores
         if (scores.isEmpty()) Tip("还没有记录。做完一套真题就记一次，这里会画出趋势线，并对照 200 分个人参考线。")
         else {
             ScoreChart(scores)
@@ -329,17 +318,15 @@ private fun ScorePartField(label: String, value: String, onValueChange: (String)
 internal fun StatsScreen(model: CheckinViewModel) {
     val c = webColors
     val state = model.state
-    val dates = state.obj("days").namesList().filter { it <= model.today }
-    val totalHours = dates.sumOf { state.obj("days").obj(it).optDouble("h", 0.0) }
-    val currentWeek = StudyPlan.monday(model.today)
-    val rate = weekStats(model.plan, state, model.today, currentWeek).rate
+    val calculations = rememberStatsCalculations(model.plan, state, model.today)
+    val rate = calculations.weeks.last().second.rate
     val cards = listOf(
         Triple("$rate%", "本周最低线完成率", c.accent),
-        Triple("🔥 ${model.plan.streak(state, model.today)}", "连续打卡（天）", c.text),
-        Triple("${dates.count { model.plan.anyDone(state.obj("days").optJSONObject(it)) }}", "累计打卡（天）", c.text),
-        Triple("${hours(totalHours)} h", "累计学习时长", c.greenStrong),
-        Triple("🩹 ${model.plan.makeupLeft(model.today.take(7), state)}", "本月补签卡剩余", c.text),
-        Triple("${daysBetween(model.today, model.plan.exam(state))}", "距初试（天）", c.orange),
+        Triple("🔥 ${calculations.streak}", "连续打卡（天）", c.text),
+        Triple("${calculations.activeDays}", "累计打卡（天）", c.text),
+        Triple("${hours(calculations.totalHours)} h", "累计学习时长", c.greenStrong),
+        Triple("🩹 ${calculations.makeupLeft}", "本月补签卡剩余", c.text),
+        Triple("${calculations.examDays}", "距初试（天）", c.orange),
     )
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         cards.chunked(2).forEach { pair ->
@@ -358,13 +345,11 @@ internal fun StatsScreen(model: CheckinViewModel) {
     Section("本周最低线完成率 $rate%") {
         ProgressBar(rate / 100f)
         Spacer(Modifier.height(8.dp))
-        Tip("上周 ${weekStats(model.plan, state, model.today, StudyPlan.addDays(currentWeek, -7)).rate}% · 上上周 ${weekStats(model.plan, state, model.today, StudyPlan.addDays(currentWeek, -14)).rate}%")
+        Tip("上周 ${calculations.weeks[6].second.rate}% · 上上周 ${calculations.weeks[5].second.rate}%")
     }
     Section("科目时间分布（按记录时长）") {
-        val totals = linkedMapOf<String, Double>()
-        dates.forEach { date -> state.obj("days").obj(date).obj("sh").let { subjects -> subjects.namesList().forEach { totals[it] = (totals[it] ?: 0.0) + subjects.getDouble(it) } } }
-        val shown = totals.filterValues { it > 0 }.entries.sortedByDescending { it.value }
-        val max = shown.maxOfOrNull { it.value }?.coerceAtLeast(1.0) ?: 1.0
+        val shown = calculations.subjectHours
+        val max = shown.maxOfOrNull { it.second }?.coerceAtLeast(1.0) ?: 1.0
         if (shown.isEmpty()) Tip("还没有科目时长记录（在今日页点「+0.5 西综」等按钮）")
         shown.forEach { (subject, total) ->
             val color = when (subject) { "西综" -> c.subjectBlue; "英语" -> c.greenStrong; "政治" -> c.orange; else -> c.purple }
@@ -372,10 +357,7 @@ internal fun StatsScreen(model: CheckinViewModel) {
         }
     }
     Section("近 8 周学习时长（橙=未达目标）") {
-        val weeks = (7 downTo 0).map { offset ->
-            val monday = StudyPlan.addDays(currentWeek, -7L * offset)
-            monday to weekStats(model.plan, state, model.today, monday)
-        }
+        val weeks = calculations.weeks
         val max = weeks.maxOf { maxOf(it.second.hours, it.second.target) }.coerceAtLeast(1.0)
         Row(Modifier.fillMaxWidth().height(78.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.Bottom) {
             weeks.forEach { (monday, stats) ->
@@ -390,7 +372,7 @@ internal fun StatsScreen(model: CheckinViewModel) {
         Spacer(Modifier.height(8.dp))
         Tip("柱高为实际时长；橙色表示低于该阶段日目标累计值")
     }
-    Section("打卡热力图（计划全程）") { HeatMap(model) }
+    Section("打卡热力图（计划全程）") { HeatMap(calculations.heatmap, model.today, model.plan.start) }
     Section("数据健康") {
         val lastBackup = state.optLong("bk")
         val daysAgo = if (lastBackup > 0L) {
@@ -419,26 +401,19 @@ internal fun StatsScreen(model: CheckinViewModel) {
 }
 
 @Composable
-private fun HeatMap(model: CheckinViewModel) {
+private fun HeatMap(heatmap: List<HeatmapWeek>, today: String, planStart: String) {
     val c = webColors
-    val history = model.state.obj("days").namesList().filter { it < model.plan.start && it <= model.today }.sorted()
-    if (model.today < model.plan.start && history.isEmpty()) { Tip("开营（${model.plan.start}）后开始记录，届时这里会显示每一天的完成热度。与已有记录一同展示。") ; return }
-    val start = StudyPlan.monday(history.firstOrNull() ?: model.plan.start)
-    val end = StudyPlan.monday(model.today)
-    val weeks = (daysBetween(start, end) / 7 + 1).toInt().coerceIn(1, 90)
+    if (heatmap.isEmpty()) { Tip("开营（$planStart）后开始记录，届时这里会显示每一天的完成热度。与已有记录一同展示。") ; return }
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-        repeat(weeks) { w ->
-            val monday = StudyPlan.addDays(start, 7L * w)
+        heatmap.forEachIndexed { index, week ->
+            val monday = week.monday
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Box(Modifier.width(11.dp).height(12.dp)) {
-                    Text(if (w == 0 || monday.substring(5, 7) != StudyPlan.addDays(monday, -7).substring(5, 7)) "${monday.substring(5, 7).toInt()}月" else "",
+                    Text(if (index == 0 || monday.substring(5, 7) != StudyPlan.addDays(monday, -7).substring(5, 7)) "${monday.substring(5, 7).toInt()}月" else "",
                         Modifier.wrapContentWidth(Alignment.Start, unbounded = true), fontSize = 9.sp, lineHeight = 12.sp, maxLines = 1, softWrap = false, color = c.sub)
                 }
-                repeat(7) { day ->
-                    val date = StudyPlan.addDays(monday, day.toLong())
-                    val rec = model.state.obj("days").optJSONObject(date)
-                    val completed = if (rec == null) 0 else model.plan.tasks(date, model.state, model.today).count { model.plan.isDone(rec, it.id) }
-                    val color = when { date > model.today -> c.line.copy(alpha = .25f); completed == 0 -> c.line; completed <= 2 -> Color(0xFF86D99C); completed <= 4 -> Color(0xFF34A853); else -> Color(0xFF15803D) }
+                week.completed.forEach { (date, completed) ->
+                    val color = when { date > today -> c.line.copy(alpha = .25f); completed == 0 -> c.line; completed <= 2 -> Color(0xFF86D99C); completed <= 4 -> Color(0xFF34A853); else -> Color(0xFF15803D) }
                     Box(Modifier.size(11.dp).clip(RoundedCornerShape(2.5.dp)).background(color))
                 }
             }

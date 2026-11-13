@@ -3,8 +3,9 @@ package com.xjb.kaoyancheckin
 import android.app.Application
 import android.content.Context
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
-import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -142,20 +143,20 @@ class ScreenshotTest {
             compose.onNodeWithText("进度").performClick()
             compose.onNodeWithText("学习进度预测").performScrollTo().assertIsDisplayed()
             capture("prog-forecast")
-            compose.onNodeWithText("0/15").performScrollTo().assertIsDisplayed()
-            compose.onAllNodesWithText("0/9").assertCountEquals(2)
-            compose.onNodeWithText("0/4").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("未开始：", substring = true).performScrollTo().assertIsDisplayed()
+            capture("prog-unstarted")
+            compose.onNodeWithText("0/15").assertDoesNotExist()
             compose.onNodeWithText("章节进度").performScrollTo()
             capture("prog-chapters")
             compose.onNodeWithText("按当前速度，预计", substring = true).performScrollTo().assertIsDisplayed()
             capture("prog-estimate")
-            compose.onAllNodesWithText("病理")[1].performScrollTo().performClick()
+            compose.onNode(hasText("病理") and hasClickAction()).performScrollTo().performClick()
             compose.onNodeWithText("淋巴造血系统疾病").performScrollTo().assertIsDisplayed()
             capture("prog-path")
-            compose.onAllNodesWithText("内科")[1].performScrollTo().performClick()
+            compose.onNode(hasText("内科") and hasClickAction()).performScrollTo().performClick()
             compose.onNodeWithText("诊断学（常见症状与体格检查）").performScrollTo().assertIsDisplayed()
             capture("prog-med")
-            compose.onAllNodesWithText("人文")[1].performScrollTo().performClick()
+            compose.onNode(hasText("人文") and hasClickAction()).performScrollTo().performClick()
             compose.onNodeWithText("卫生法律法规").performScrollTo().assertIsDisplayed()
             capture("prog-humanities")
 
@@ -206,6 +207,12 @@ class ScreenshotTest {
             compose.onNodeWithText("统计").performClick()
             compose.onNodeWithText("近 8 周学习时长（橙=未达目标）").performScrollTo().assertIsDisplayed()
             capture("winter-stats")
+            compose.runOnIdle { model.notify("示例提示：已保存学习记录") }
+            compose.onNodeWithText("示例提示：已保存学习记录").assertIsDisplayed()
+            compose.onNodeWithText("撤销").assertDoesNotExist()
+            capture("notice-snackbar")
+            compose.onNodeWithText("今日").performClick()
+            capture("tabbar")
         }
     }
 }

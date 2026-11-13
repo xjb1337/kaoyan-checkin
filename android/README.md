@@ -6,6 +6,12 @@ Kotlin + Jetpack Compose / Material 3 原生应用。应用 ID：`com.xjb.kaoyan
 
 ## 构建与测试
 
+界面继续沿用 `WebTheme` / `WebComponents`：启动窗口和 Android 12+ Splash 分别提供浅/深色资源，进入界面后系统栏图标和底色跟随当前皮肤。底部六个 Tab 使用手写描边 VectorDrawable，不依赖 `material-icons-extended`。
+
+进度预测、计划对照、模考排序、今日预测摘要、统计聚合和热力图按 `plan/state/today` 缓存；保存、导入、撤销后发布新的状态对象使缓存失效，跨午夜的 `today` 变化也会重算。仅展开章节、编辑未保存草稿或显示提示不会重新遍历全部记录。计划尚未开始且没有勾选的科目合并为「未开始：科目 日期、…」，提前学习的科目仍保留进度行。
+
+普通提示与撤销共用同一 Snackbar 外观，但使用独立 Host 和队列：普通提示无「撤销」按钮，不打断撤销倒计时/操作。小组件没有 Compose 宿主，保存失败时在桌面摘要中提示，前台或下次打开应用时通过同款普通 Snackbar 显示一次；错误提示单独保存在设备偏好，不写入学习备份。
+
 需要 JDK 17、Android SDK Platform 35 / Build Tools 35，以及可访问 Google Maven、Maven Central 的网络。Gradle 8.9 Wrapper 已随源码提供，不需要系统 Gradle。
 
 ```bash
@@ -57,6 +63,8 @@ Repository 的每一代连接在 IO 线程同步执行 DAO 操作，读写与关
 若 Gradle 或 Robolectric 需要显式使用本机代理，在命令末尾加上 `-Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=7891 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7891`。依赖和 Robolectric 的 API 34 文件均已缓存时可加 `--offline`。
 
 图片默认写入 `app/build/screenshots/`，再次录制会覆盖同名文件；可用 `-PscreenshotDir=/绝对路径` 或 `-DscreenshotDir=/绝对路径` 指定其他目录以保留基线。普通 `testDebugUnitTest` 不运行截图类，也不校验基线。
+
+`ScreenshotTest` 还录制 `app-tabbar.png`、`app-prog-unstarted.png`、`app-notice-snackbar.png` 及对应 `-dark` 图，分别覆盖矢量底栏、合并后的未开始科目与无撤销按钮的普通提示。`StartupThemeTest` 覆盖 API 28/34 浅深色启动资源；`SystemBarsAndTabsTest` 覆盖所有皮肤的系统栏和 Tab 语义；`ScreenCacheTest` 验证无关重组复用结果、保存和跨午夜失效；`UndoLifecycleTest` 保留原有撤销流程并覆盖普通提示共存。
 
 截图种子是合成数据，今日新词 40、复习 90，生理有两章及首次勾选日期。录制时会额外滚动到单词输入和章节估算，生成 `app-today-words.png`、`app-prog-estimate.png` 及对应的 `-dark` 深色图。测试还触发单词任务勾选切换并等待撤销按钮出现，生成 `app-today-undo.png` / `app-today-undo-dark.png`；截图后会点击撤销。运行截图测试的机器仍应人工检查图片，尤其是小屏、字体放大和其他主题。
 
