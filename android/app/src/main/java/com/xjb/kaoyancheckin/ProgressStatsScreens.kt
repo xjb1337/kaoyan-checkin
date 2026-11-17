@@ -333,13 +333,16 @@ private fun ForecastRow(
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(text, color = c.text, fontSize = 12.5.sp, lineHeight = 19.sp)
-            if (method != null || gates.isNotEmpty()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    method?.let { Chip(it, c.sub, c.bg) }
-                    gates.forEach { Chip(it, if (it == "缺首次日期" && onClick != null) c.accent else c.sub,
-                        if (it == "缺首次日期" && onClick != null) c.chipBlue else c.bg) }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(text, color = c.text, fontSize = 13.sp, lineHeight = 19.sp)
+            val actionGate = if (onClick != null) gates.firstOrNull { it == "缺首次日期" } else null
+            val metaParts = listOfNotNull(method) + gates.filter { it != actionGate }
+            if (metaParts.isNotEmpty() || actionGate != null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (metaParts.isNotEmpty()) {
+                        Text(metaParts.joinToString(" · "), color = c.sub, fontSize = 11.5.sp)
+                    }
+                    if (actionGate != null) Chip("补录首次日期", c.accent, c.chipBlue)
                 }
             }
         }

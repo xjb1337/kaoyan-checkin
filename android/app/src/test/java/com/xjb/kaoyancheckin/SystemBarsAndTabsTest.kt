@@ -2,6 +2,7 @@ package com.xjb.kaoyancheckin
 
 import android.app.Application
 import android.graphics.drawable.ColorDrawable
+import android.os.Looper
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -23,6 +24,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
@@ -58,7 +60,10 @@ class SystemBarsAndTabsTest {
                 model = ViewModelProvider(it)[CheckinViewModel::class.java]
                 appearance = ViewModelProvider(it)[ThemeViewModel::class.java]
             }
-            compose.waitUntil(timeoutMillis = 15_000) { model.ready }
+            compose.waitUntil(timeoutMillis = 15_000) {
+                shadowOf(Looper.getMainLooper()).idle()
+                model.ready
+            }
             compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)).assertCountEquals(4)
             compose.onNodeWithText("今日").assertIsSelected()
             compose.onNodeWithText("计划").performClick().assertIsSelected()

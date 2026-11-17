@@ -11,8 +11,8 @@ android {
         applicationId = "com.xjb.kaoyancheckin"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "1.2.0"
+        versionCode = 10
+        versionName = "1.2.1"
     }
     // CI supplies all four values; without them release uses the same local debug identity.
     val signingValues = listOf("SIGNING_STORE_FILE", "SIGNING_STORE_PASSWORD", "SIGNING_KEY_ALIAS", "SIGNING_KEY_PASSWORD")
@@ -43,31 +43,6 @@ android {
     testOptions { unitTests.isIncludeAndroidResources = true }
 }
 
-val recordScreenshots = providers.gradleProperty("recordScreenshots").map(String::toBoolean).orElse(false)
-val screenshotDir = providers.gradleProperty("screenshotDir")
-    .orElse(providers.systemProperty("screenshotDir"))
-    .orElse(layout.buildDirectory.dir("screenshots").map { it.asFile.absolutePath })
-
-tasks.withType<Test>().configureEach {
-    if (recordScreenshots.get()) {
-        systemProperty("roborazzi.test.record", "true")
-        systemProperty("screenshotDir", screenshotDir.get())
-        // Robolectric may need to download its instrumented SDK in the test JVM.
-        listOf("http.proxyHost", "http.proxyPort", "https.proxyHost", "https.proxyPort").forEach { name ->
-            providers.systemProperty(name).orNull?.let { systemProperty(name, it) }
-        }
-        forkEvery = 1L
-        outputs.upToDateWhen { false }
-    } else {
-        exclude(
-            "**/ScreenshotTest.class",
-            "**/WidgetScreenshotTest.class",
-            "**/IconRenderTest.class",
-            "**/SnackbarThemeScreenshotTest.class",
-        )
-    }
-}
-
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.09.03"))
     implementation("androidx.core:core-ktx:1.13.1")
@@ -88,6 +63,5 @@ dependencies {
     testImplementation("androidx.compose.ui:ui-test-junit4")
     testImplementation("androidx.test:core:1.6.1")
     testImplementation("org.robolectric:robolectric:4.13")
-    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.38.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

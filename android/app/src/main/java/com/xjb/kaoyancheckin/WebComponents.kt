@@ -64,9 +64,9 @@ internal fun Section(
     val c = webColors
     Column(
         modifier.fillMaxWidth()
-            .shadow(if (c.dark) 0.dp else 1.dp, RoundedCornerShape(16.dp))
-            .background(c.card, RoundedCornerShape(16.dp))
-            .border(1.dp, c.line, RoundedCornerShape(16.dp))
+            .shadow(if (c.dark) 0.dp else 1.dp, RoundedCornerShape(18.dp))
+            .background(c.card, RoundedCornerShape(18.dp))
+            .border(1.dp, c.line, RoundedCornerShape(18.dp))
             .padding(14.dp),
     ) {
         if (title != null) {
@@ -136,29 +136,35 @@ internal fun TaskRow(label: String, checked: Boolean, enabled: Boolean = true, t
                      minimum: Boolean = false, onDelete: (() -> Unit)? = null,
                      trailing: (@Composable RowScope.() -> Unit)? = null, onChange: () -> Unit) {
     val c = webColors
-    Row(Modifier.fillMaxWidth().heightIn(min = 58.dp), verticalAlignment = Alignment.CenterVertically) {
-        Row(Modifier.weight(1f).heightIn(min = 58.dp)
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.weight(1f).heightIn(min = 56.dp)
             .toggleable(checked, enabled = enabled, role = Role.Checkbox, onValueChange = { onChange() })
-            .padding(horizontal = 2.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            RoundCheck(checked)
-            Text(label, Modifier.weight(1f), fontSize = 15.sp, lineHeight = 22.sp,
-                fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal,
-                color = if (checked) c.sub else c.text,
-                textDecoration = if (checked) TextDecoration.LineThrough else TextDecoration.None)
-            if (minimum) Chip("最低线", c.accent, c.chipBlue)
-            if (tag != null) {
-                val (fg, bg) = when (tag) {
-                    "西综" -> c.blueTag to c.chipSubjectBlue
-                    "英语" -> c.greenTag to c.chipGreen
-                    "政治" -> c.orangeTag to c.chipOrange
-                    "复试" -> c.redTag to c.chipRed
-                    else -> c.purpleTag to c.chipPurple
+            .padding(horizontal = 2.dp, vertical = 10.dp), verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(Modifier.padding(top = 2.dp)) { RoundCheck(checked) }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(label, fontSize = 14.5.sp, lineHeight = 21.sp,
+                    fontWeight = if (bold && !checked) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (checked) c.sub else c.text,
+                    textDecoration = if (checked) TextDecoration.LineThrough else TextDecoration.None)
+                if (minimum || tag != null || trailing != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (minimum) Chip("最低线", c.accent, c.chipBlue)
+                        if (tag != null) {
+                            val (fg, bg) = when (tag) {
+                                "西综" -> c.blueTag to c.chipSubjectBlue
+                                "英语" -> c.greenTag to c.chipGreen
+                                "政治" -> c.orangeTag to c.chipOrange
+                                "复试" -> c.redTag to c.chipRed
+                                else -> c.purpleTag to c.chipPurple
+                            }
+                            Chip(tag, fg, bg)
+                        }
+                        trailing?.invoke(this)
+                    }
                 }
-                Chip(tag, fg, bg)
             }
         }
-        trailing?.invoke(this)
         if (onDelete != null) {
             WebButton("✕", onDelete, Modifier.padding(start = 4.dp, end = 2.dp), enabled = enabled,
                 accessibilityLabel = "删除$label")

@@ -133,7 +133,10 @@ class UndoLifecycleTest {
         database.launchActivity().use { scenario ->
             lateinit var model: CheckinViewModel
             scenario.onActivity { model = ViewModelProvider(it)[CheckinViewModel::class.java] }
-            compose.waitUntil(timeoutMillis = 15_000) { model.ready }
+            compose.waitUntil(timeoutMillis = 15_000) {
+                shadowOf(Looper.getMainLooper()).idle()
+                model.ready
+            }
             compose.runOnIdle { model.toggleTask(date, "words") }
             waitForSnackbar(model)
             val token = checkNotNull(model.pendingUndo).token
@@ -156,7 +159,10 @@ class UndoLifecycleTest {
         database.launchActivity().use { scenario ->
             lateinit var model: CheckinViewModel
             scenario.onActivity { model = ViewModelProvider(it)[CheckinViewModel::class.java] }
-            compose.waitUntil(timeoutMillis = 15_000) { model.ready }
+            compose.waitUntil(timeoutMillis = 15_000) {
+                shadowOf(Looper.getMainLooper()).idle()
+                model.ready
+            }
             compose.onNodeWithText("示例小组件保存失败").assertIsDisplayed()
             compose.onNodeWithText("撤销").assertDoesNotExist()
             assertNull(WidgetNotice.peek(app))

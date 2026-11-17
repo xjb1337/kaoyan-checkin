@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -18,7 +19,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -91,7 +94,28 @@ internal fun TodayScreen(model: CheckinViewModel) {
     }
     if (model.today < model.plan.start) Banner("🎯 开营 ${shortDate(model.plan.start)} · 还有 ${daysBetween(model.today, model.plan.start)} 天", "info")
     if (CheckinCore.needsBackup(state, System.currentTimeMillis())) {
-        Banner("💾 记得备份到手机外 ·", "info") { WebButton("去备份", { model.page = 5 }) }
+        Banner("💾 记得备份到手机外 ·", "info") { WebButton("去备份", { model.page = 3 }) }
+    }
+    val maximum = if (phase.optInt("fs") == 1) 1 else 2
+    val met = remember(model.plan, state, date, today) { model.plan.satisfied(date, state) }
+    val past = date < model.today
+    val minDone = remember(model.plan, state, date) { model.plan.minCount(date, state) }
+    val doneTasks = tasks.count { model.plan.isDone(record, it.id) }
+    val todayHours = record.optDouble("h", 0.0)
+    val goalHours = model.plan.goalHours(date, state, model.today)
+    val streak = remember(model.plan, state, today) { model.plan.streak(state, today) }
+    if (date >= model.plan.start && date <= model.today && tasks.isNotEmpty()) {
+        TodayHeroCard(
+            phaseName = phase.optString("name"),
+            streak = streak,
+            minDone = minDone,
+            minRequired = maximum,
+            met = met,
+            doneTasks = doneTasks,
+            totalTasks = tasks.size,
+            todayHours = todayHours,
+            goalHours = goalHours,
+        )
     }
     if (isToday && model.loadError.isEmpty()) {
         val summary = rememberTodayForecast(model.plan, state, today)
@@ -103,14 +127,11 @@ internal fun TodayScreen(model: CheckinViewModel) {
             ForecastGlance(summary) { model.page = 2 }
         }
     }
-    val maximum = if (phase.optInt("fs") == 1) 1 else 2
-    val met = remember(model.plan, state, date, today) { model.plan.satisfied(date, state) }
-    val past = date < model.today
     when {
         date < model.plan.start || date > model.today -> Unit
         model.plan.isMakeup(date, state) -> Banner("🩹 已用补签卡保住这天（本月还剩 ${model.plan.makeupLeft(date.take(7), state)} 张）", "ok")
         past && !met -> {
-            Banner("最低完成线 ${model.plan.minCount(date, state)}/$maximum", "warn") {
+            Banner("最低完成线 $minDone/$maximum", "warn") {
                 Chip("未达标", webColors.red, webColors.chipRed)
                 if (phase.optInt("fs") != 1 && model.plan.makeupLeft(date.take(7), state) > 0)
                     WebButton("🩹 用补签卡", { model.makeup(date) }, enabled = enabled)
@@ -120,38 +141,13 @@ internal fun TodayScreen(model: CheckinViewModel) {
     val minBadge = when {
         date < model.plan.start || date > model.today -> null
         met -> "保底已达标"
-        else -> "最低线 ${model.plan.minCount(date, state)}/$maximum"
+        else -> "最低线 $minDone/$maximum"
     }
     Section(
-        "今日任务 ${tasks.count { model.plan.isDone(record, it.id) }}/${tasks.size}",
+        "今日任务 $doneTasks/${tasks.size}",
         badge = minBadge,
         modifier = Modifier.bringIntoViewRequester(tasksRequester),
     ) {
-        if (date >= model.plan.start && date <= model.today && tasks.isNotEmpty()) {
-            val todayHours = record.optDouble("h", 0.0)
-            val goalHours = model.plan.goalHours(date, state, model.today)
-            val doneTasks = tasks.count { model.plan.isDone(record, it.id) }
-            Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SummaryMetric(
-                    "${model.plan.minCount(date, state)}/$maximum",
-                    if (met) "最低线达标" else "最低线",
-                    if (met) webColors.green else webColors.accent,
-                    Modifier.weight(1f),
-                )
-                SummaryMetric(
-                    "$doneTasks/${tasks.size}",
-                    "今日任务",
-                    if (doneTasks == tasks.size) webColors.green else webColors.text,
-                    Modifier.weight(1f),
-                )
-                SummaryMetric(
-                    "${hours(todayHours)}/${hours(goalHours)}h",
-                    "学习时长",
-                    if (todayHours >= goalHours) webColors.green else webColors.text,
-                    Modifier.weight(1f),
-                )
-            }
-        }
         if (tasks.isEmpty() && date < model.plan.start) {
             Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -169,11 +165,12 @@ internal fun TodayScreen(model: CheckinViewModel) {
             val deletable = task.id.startsWith("c:") || task.id.startsWith("r:")
             val quickHour: (@Composable RowScope.() -> Unit)? = if (enabled && date <= model.today && task.tag in listOf("西综", "英语")) {
                 {
-                    Box(Modifier.padding(start = 4.dp).clip(RoundedCornerShape(6.dp))
+                    val currentHours = record.obj("sh").optDouble(task.tag, 0.0)
+                    Box(Modifier.clip(CircleShape)
                         .background(webColors.chipBlue)
                         .clickable { model.adjustHours(date, task.tag, 0.5) }
-                        .padding(horizontal = 7.dp, vertical = 4.dp)) {
-                        Text("+0.5h", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = webColors.accent)
+                        .padding(horizontal = 8.dp, vertical = 2.dp)) {
+                        Text("${hours(currentHours)}h · +0.5h", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = webColors.accent)
                     }
                 }
             } else null
@@ -296,6 +293,57 @@ internal fun TodayScreen(model: CheckinViewModel) {
     deleteTarget?.let { id ->
         ConfirmDialog("删除这条任务？", "只删除 $date 的当天记录，固定任务设置不会改变。",
             { deleteTarget = null }) { model.deleteCustomTask(date, id) }
+    }
+}
+
+@Composable
+private fun TodayHeroCard(
+    phaseName: String,
+    streak: Int,
+    minDone: Int,
+    minRequired: Int,
+    met: Boolean,
+    doneTasks: Int,
+    totalTasks: Int,
+    todayHours: Double,
+    goalHours: Double,
+) {
+    val c = webColors
+    val gradient = Brush.linearGradient(listOf(c.blue, lerp(c.blue, Color.Black, 0.24f)))
+    Column(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(gradient)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(phaseName, Modifier.weight(1f), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Box(Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.18f)).padding(horizontal = 9.dp, vertical = 3.dp)) {
+                Text(if (met) "连续 $streak 天 · 已达标" else "连续 $streak 天", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(
+                "$minDone/$minRequired" to "最低线",
+                "$doneTasks/$totalTasks" to "今日任务",
+                "${hours(todayHours)}/${hours(goalHours)}h" to "学习时长",
+            ).forEach { (value, label) ->
+                Column(
+                    Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.14f))
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(value, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+                    Text(label, color = Color.White.copy(alpha = 0.82f), fontSize = 11.sp, maxLines = 1)
+                }
+            }
+        }
+        val ratio = if (totalTasks == 0) 0f else (doneTasks.toFloat() / totalTasks).coerceIn(0f, 1f)
+        Box(Modifier.fillMaxWidth().height(4.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.22f))) {
+            Box(Modifier.fillMaxHeight().fillMaxWidth(ratio).background(Color.White, CircleShape))
+        }
     }
 }
 

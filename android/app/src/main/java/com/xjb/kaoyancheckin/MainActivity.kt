@@ -24,6 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -161,13 +162,20 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
                         Text(model.loadError, color = c.red)
                         WebButton("前往设置，导出原始存档或恢复", { model.page = 3 })
                     }
-                    if (!CheckinCore.hasData(model.state) && model.page != 3 && !onboardingDismissed) Section("开始使用") {
+                    if (!CheckinCore.hasData(model.state) && model.page != 3 && !onboardingDismissed) Section {
+                        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("开始使用", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = c.sub)
+                            Text("✕", Modifier.clip(androidx.compose.foundation.shape.CircleShape)
+                                .clickable { onboardingDismissed = true }
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                                color = c.sub, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            WebButton("导入网页备份", { model.page = 3 }, Modifier.weight(1f), big = true)
+                            WebButton("导入网页备份", { model.page = 3 }, Modifier.weight(1f))
                             WebButton("直接开始打卡", {
                                 onboardingDismissed = true
                                 model.page = 0
-                            }, Modifier.weight(1f), big = true, primary = true)
+                            }, Modifier.weight(1f), primary = true)
                         }
                     }
                     when (model.page) {
@@ -225,13 +233,19 @@ internal fun TabBar(selected: Int, onSelect: (Int) -> Unit) {
         Divider()
         Row(Modifier.widthIn(max = 540.dp).fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))) {
             labels.forEachIndexed { index, label ->
-                Column(Modifier.weight(1f).heightIn(min = 54.dp).selectable(selected == index, role = Role.Tab, onClick = { onSelect(index) })
-                    .padding(top = 7.dp, bottom = 5.dp), horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(1.dp, Alignment.CenterVertically)) {
-                    Icon(painterResource(icons[index]), contentDescription = null, Modifier.size(22.dp),
-                        tint = if (selected == index) c.accent else c.sub)
-                    Text(label, color = if (selected == index) c.accent else c.sub, fontSize = 11.sp,
-                        lineHeight = 16.sp, fontWeight = if (selected == index) FontWeight.Bold else FontWeight.Normal, maxLines = 1)
+                val active = selected == index
+                Column(Modifier.weight(1f).heightIn(min = 58.dp).selectable(active, role = Role.Tab, onClick = { onSelect(index) })
+                    .padding(top = 6.dp, bottom = 5.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically)) {
+                    Box(Modifier.width(48.dp).height(28.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(if (active) c.chipBlue else androidx.compose.ui.graphics.Color.Transparent),
+                        contentAlignment = Alignment.Center) {
+                        Icon(painterResource(icons[index]), contentDescription = null, Modifier.size(20.dp),
+                            tint = if (active) c.accent else c.sub)
+                    }
+                    Text(label, color = if (active) c.accent else c.sub, fontSize = 11.sp,
+                        lineHeight = 14.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Medium, maxLines = 1)
                 }
             }
         }

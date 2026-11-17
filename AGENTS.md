@@ -16,4 +16,4 @@
 ## 数据口径与历史存档兼容
 - **小组件与首页一致**：小组件（`WidgetSnapshot` / `WidgetPresentation`）展示的任务列表与完成计数须与「今日」页保持一致（同时体现全部当日任务与最低线达标状态），避免 App 显示 `3/4` 而小组件只显示 `2/2`。
 - **历史存档兜底与可补录**：新增依赖新字段（如 `cf` 首次日期、`cd` 章节日期）的预测或统计功能时，不能假设旧版本或网页版导入的存档已包含这些字段；缺失时优先用已有日期字段回退，并在界面上提供直接补录入口。
-- **UI 与导航改动同步更新测试**：调整底部 Tab、小组件文案或核心交互后，同步检查并更新 `SystemBarsAndTabsTest`、`DraftLifecycleTest`、`ScreenshotTest`、`WidgetSnapshotTest` 与 `WidgetPresentationTest`。
+- **UI 与导航改动同步更新测试**：调整底部 Tab、小组件文案或核心交互后，同步检查并更新 `SystemBarsAndTabsTest`、`DraftLifecycleTest`、`WidgetSnapshotTest` 与 `WidgetPresentationTest`。
