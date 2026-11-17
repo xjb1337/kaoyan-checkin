@@ -127,6 +127,31 @@ internal fun TodayScreen(model: CheckinViewModel) {
         badge = minBadge,
         modifier = Modifier.bringIntoViewRequester(tasksRequester),
     ) {
+        if (date >= model.plan.start && date <= model.today && tasks.isNotEmpty()) {
+            val todayHours = record.optDouble("h", 0.0)
+            val goalHours = model.plan.goalHours(date, state, model.today)
+            val doneTasks = tasks.count { model.plan.isDone(record, it.id) }
+            Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SummaryMetric(
+                    "${model.plan.minCount(date, state)}/$maximum",
+                    if (met) "最低线达标" else "最低线",
+                    if (met) webColors.green else webColors.accent,
+                    Modifier.weight(1f),
+                )
+                SummaryMetric(
+                    "$doneTasks/${tasks.size}",
+                    "今日任务",
+                    if (doneTasks == tasks.size) webColors.green else webColors.text,
+                    Modifier.weight(1f),
+                )
+                SummaryMetric(
+                    "${hours(todayHours)}/${hours(goalHours)}h",
+                    "学习时长",
+                    if (todayHours >= goalHours) webColors.green else webColors.text,
+                    Modifier.weight(1f),
+                )
+            }
+        }
         if (tasks.isEmpty() && date < model.plan.start) {
             Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -142,23 +167,21 @@ internal fun TodayScreen(model: CheckinViewModel) {
         @Composable
         fun renderTask(task: StudyTask) {
             val deletable = task.id.startsWith("c:") || task.id.startsWith("r:")
-            TaskRow(task.label, model.plan.isDone(record, task.id), enabled, task.tag, task.id in minimumIds,
-                minimum = task.id in minimumIds,
-                onDelete = if (deletable) ({ deleteTarget = task.id }) else null) {
-                model.toggleTask(date, task.id)
-            }
-            if (enabled && date <= model.today && task.tag in listOf("西综", "英语")) {
-                Row(Modifier.fillMaxWidth().padding(start = 32.dp, bottom = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    val currentHours = record.obj("sh").optDouble(task.tag, 0.0)
-                    Text("${task.tag} ${hours(currentHours)}h", fontSize = 11.5.sp, color = webColors.sub)
-                    Box(Modifier.clip(RoundedCornerShape(6.dp))
+            val quickHour: (@Composable RowScope.() -> Unit)? = if (enabled && date <= model.today && task.tag in listOf("西综", "英语")) {
+                {
+                    Box(Modifier.padding(start = 4.dp).clip(RoundedCornerShape(6.dp))
                         .background(webColors.chipBlue)
                         .clickable { model.adjustHours(date, task.tag, 0.5) }
-                        .padding(horizontal = 8.dp, vertical = 3.dp)) {
+                        .padding(horizontal = 7.dp, vertical = 4.dp)) {
                         Text("+0.5h", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = webColors.accent)
                     }
                 }
+            } else null
+            TaskRow(task.label, model.plan.isDone(record, task.id), enabled, task.tag, task.id in minimumIds,
+                minimum = task.id in minimumIds,
+                onDelete = if (deletable) ({ deleteTarget = task.id }) else null,
+                trailing = quickHour) {
+                model.toggleTask(date, task.id)
             }
             if (task.id == "words") {
                 Column(Modifier.fillMaxWidth().padding(start = 32.dp, top = 4.dp, bottom = 10.dp),
@@ -292,7 +315,7 @@ private fun ForecastGlance(items: List<ForecastSummaryItem>, openDetails: () -> 
             Text("学习预测", Modifier.weight(1f), color = c.sub, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             Text("详情 ›", color = c.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
-        items.take(4).forEach { item ->
+        items.take(2).forEach { item ->
             val (color, background) = when (item.tone) {
                 ForecastTone.GOOD -> c.green to c.chipGreen
                 ForecastTone.BAD -> c.red to c.chipRed

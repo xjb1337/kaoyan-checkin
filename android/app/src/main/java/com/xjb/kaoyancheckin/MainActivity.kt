@@ -153,6 +153,8 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
             if (!model.ready) CircularProgressIndicator(Modifier.align(Alignment.Center))
             else key(model.page, openTodaySignal) {
+                var planSubPage by rememberSaveable { mutableStateOf(0) }
+                var reviewSubPage by rememberSaveable { mutableStateOf(0) }
                 Column(Modifier.widthIn(max = 540.dp).fillMaxWidth().verticalScroll(rememberScrollState())
                     .padding(horizontal = 12.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (model.loadError.isNotEmpty()) Section("存档读取异常") {
@@ -171,12 +173,12 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
                     when (model.page) {
                         0 -> TodayScreen(model)
                         1 -> {
-                            WeekScreen(model)
-                            MilestonesScreen(model)
+                            SegmentedBar(listOf("本周目标", "阶段节点"), planSubPage) { planSubPage = it }
+                            if (planSubPage == 0) WeekScreen(model) else MilestonesScreen(model)
                         }
                         2 -> {
-                            ProgressScreen(model)
-                            StatsScreen(model)
+                            SegmentedBar(listOf("进度预测", "统计趋势"), reviewSubPage) { reviewSubPage = it }
+                            if (reviewSubPage == 0) ProgressScreen(model) else StatsScreen(model)
                         }
                         else -> SettingsScreen(model, updates, appearance)
                     }

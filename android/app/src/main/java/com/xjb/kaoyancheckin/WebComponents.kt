@@ -133,7 +133,8 @@ internal fun Chip(text: String, color: Color, background: Color, modifier: Modif
 
 @Composable
 internal fun TaskRow(label: String, checked: Boolean, enabled: Boolean = true, tag: String? = null, bold: Boolean = false,
-                     minimum: Boolean = false, onDelete: (() -> Unit)? = null, onChange: () -> Unit) {
+                     minimum: Boolean = false, onDelete: (() -> Unit)? = null,
+                     trailing: (@Composable RowScope.() -> Unit)? = null, onChange: () -> Unit) {
     val c = webColors
     Row(Modifier.fillMaxWidth().heightIn(min = 58.dp), verticalAlignment = Alignment.CenterVertically) {
         Row(Modifier.weight(1f).heightIn(min = 58.dp)
@@ -157,6 +158,7 @@ internal fun TaskRow(label: String, checked: Boolean, enabled: Boolean = true, t
                 Chip(tag, fg, bg)
             }
         }
+        trailing?.invoke(this)
         if (onDelete != null) {
             WebButton("✕", onDelete, Modifier.padding(start = 4.dp, end = 2.dp), enabled = enabled,
                 accessibilityLabel = "删除$label")
@@ -350,5 +352,42 @@ internal fun BarRow(label: String, value: String, progress: Float, color: Color,
             }
         }
         Text(value, Modifier.width(46.dp), textAlign = TextAlign.End, color = webColors.sub, fontSize = 11.5.sp, maxLines = 1)
+    }
+}
+
+@Composable
+internal fun SegmentedBar(options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+    val c = webColors
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.card)
+            .border(1.dp, c.line, RoundedCornerShape(12.dp)).padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        options.forEachIndexed { index, label ->
+            val active = selected == index
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(9.dp))
+                    .background(if (active) c.blue else Color.Transparent)
+                    .clickable { onSelect(index) }
+                    .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(label, fontSize = 13.5.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                    color = if (active) Color.White else c.sub, maxLines = 1)
+            }
+        }
+    }
+}
+
+@Composable
+internal fun SummaryMetric(value: String, label: String, color: Color, modifier: Modifier = Modifier) {
+    val c = webColors
+    Column(
+        modifier.clip(RoundedCornerShape(10.dp)).background(c.bg).padding(horizontal = 10.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(value, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = color, maxLines = 1)
+        Text(label, fontSize = 11.sp, color = c.sub, maxLines = 1)
     }
 }
