@@ -285,7 +285,7 @@ class ProgressForecastTest {
     fun subjectWithoutFirstDateFallsBackToChapterDatesWhenPresent() {
         val forecast = forecastSubject(
             subject(),
-            subjectState(done = 2, chapterDates = mapOf(0 to "2026-11-02", 1 to "2026-11-10")),
+            subjectState(done = 2, dates = mapOf(0 to "2026-11-02", 1 to "2026-11-10")),
             date("2026-11-14"),
         )
 
