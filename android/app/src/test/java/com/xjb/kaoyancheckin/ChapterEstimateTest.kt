@@ -74,5 +74,7 @@ class ChapterEstimateTest {
         val subject = JSONObject().put("k", "phys").put("ch", JSONArray().put("一").put("二").put("三"))
         toggleChapter(state, subject, 1, "2026-11-10")
         assertFalse(state.obj("cf").has("phys"))
+        setChapterFirstDate(state, "phys", "2026-11-02")
+        assertEquals("2026-11-02", state.obj("cf").getString("phys"))
     }
 }

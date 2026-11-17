@@ -17,6 +17,10 @@ class WidgetPresentationTest {
     @Test fun statusShowsAchievementAndBoundsProgress() {
         assertEquals(WidgetStatus("最低线 0/2 · 未达标", 0f), widgetStatus(snapshot))
         assertEquals(WidgetStatus("最低线 2/2 · 已达标", 1f), widgetStatus(snapshot.copy(completed = 2, satisfied = true)))
+        assertEquals(
+            WidgetStatus("任务 3/4 · 最低线 2/2 · 已达标", 1f),
+            widgetStatus(snapshot.copy(completed = 2, satisfied = true, totalDone = 3, totalTasks = 4)),
+        )
         assertEquals(1f, widgetStatus(snapshot.copy(completed = 0, satisfied = true)).progress, 0f)
         assertEquals(.5f, widgetStatus(snapshot.copy(completed = 1)).progress, 0f)
         assertEquals(1f, widgetStatus(snapshot.copy(completed = 5)).progress, 0f)

@@ -59,9 +59,9 @@ class SystemBarsAndTabsTest {
                 appearance = ViewModelProvider(it)[ThemeViewModel::class.java]
             }
             compose.waitUntil(timeoutMillis = 15_000) { model.ready }
-            compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)).assertCountEquals(6)
+            compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)).assertCountEquals(4)
             compose.onNodeWithText("今日").assertIsSelected()
-            compose.onNodeWithText("进度").performClick().assertIsSelected()
+            compose.onNodeWithText("计划").performClick().assertIsSelected()
             AppTheme.entries.forEach { theme ->
                 compose.runOnIdle { appearance.select(theme) }
                 compose.waitForIdle()
@@ -75,7 +75,7 @@ class SystemBarsAndTabsTest {
                     assertEquals(android.graphics.Color.TRANSPARENT, it.window.navigationBarColor)
                     assertEquals(1, model.page)
                 }
-                compose.onNodeWithText("进度").assertIsSelected()
+                compose.onNodeWithText("计划").assertIsSelected()
             }
         }
     }

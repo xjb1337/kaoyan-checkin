@@ -16,8 +16,11 @@ internal fun widgetStatus(snapshot: WidgetSnapshot?): WidgetStatus {
     val summary = when {
         snapshot == null -> "存档异常，请打开应用"
         snapshot.beforePlan -> "计划尚未开始"
-        snapshot.satisfied -> "最低线 ${snapshot.completed}/${snapshot.required} · 已达标"
-        else -> "最低线 ${snapshot.completed}/${snapshot.required} · 未达标"
+        else -> {
+            val minStatus = "最低线 ${snapshot.completed}/${snapshot.required} · ${if (snapshot.satisfied) "已达标" else "未达标"}"
+            if (snapshot.totalTasks > snapshot.required) "任务 ${snapshot.totalDone}/${snapshot.totalTasks} · $minStatus"
+            else minStatus
+        }
     }
     val progress = when {
         snapshot == null || snapshot.beforePlan || snapshot.required <= 0 -> 0f

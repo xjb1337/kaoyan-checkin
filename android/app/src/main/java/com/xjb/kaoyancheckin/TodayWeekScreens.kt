@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
@@ -99,28 +100,31 @@ internal fun TodayScreen(model: CheckinViewModel) {
                 WebButton("去打卡", { scope.launch { tasksRequester.bringIntoView() } })
             }
         } else {
-            ForecastGlance(summary) { model.page = 1 }
+            ForecastGlance(summary) { model.page = 2 }
         }
     }
     val maximum = if (phase.optInt("fs") == 1) 1 else 2
     val met = remember(model.plan, state, date, today) { model.plan.satisfied(date, state) }
+    val past = date < model.today
     when {
         date < model.plan.start || date > model.today -> Unit
         model.plan.isMakeup(date, state) -> Banner("🩹 已用补签卡保住这天（本月还剩 ${model.plan.makeupLeft(date.take(7), state)} 张）", "ok")
-        met -> Banner(if (isToday) "✓ 今日保底已完成" else "✓ 保底已完成", "ok")
-        else -> {
-            val past = date < model.today
-            Banner("最低完成线 ${model.plan.minCount(date, state)}/$maximum", if (past) "warn" else "info") {
-                Chip(if (past) "未达标" else "进行中",
-                    if (past) webColors.red else webColors.accent,
-                    if (past) webColors.chipRed else webColors.chipBlue)
-                if (past && phase.optInt("fs") != 1 && model.plan.makeupLeft(date.take(7), state) > 0)
+        past && !met -> {
+            Banner("最低完成线 ${model.plan.minCount(date, state)}/$maximum", "warn") {
+                Chip("未达标", webColors.red, webColors.chipRed)
+                if (phase.optInt("fs") != 1 && model.plan.makeupLeft(date.take(7), state) > 0)
                     WebButton("🩹 用补签卡", { model.makeup(date) }, enabled = enabled)
             }
         }
     }
+    val minBadge = when {
+        date < model.plan.start || date > model.today -> null
+        met -> "保底已达标"
+        else -> "最低线 ${model.plan.minCount(date, state)}/$maximum"
+    }
     Section(
         "今日任务 ${tasks.count { model.plan.isDone(record, it.id) }}/${tasks.size}",
+        badge = minBadge,
         modifier = Modifier.bringIntoViewRequester(tasksRequester),
     ) {
         if (tasks.isEmpty() && date < model.plan.start) {
@@ -143,15 +147,48 @@ internal fun TodayScreen(model: CheckinViewModel) {
                 onDelete = if (deletable) ({ deleteTarget = task.id }) else null) {
                 model.toggleTask(date, task.id)
             }
+            if (enabled && date <= model.today && task.tag in listOf("西综", "英语")) {
+                Row(Modifier.fillMaxWidth().padding(start = 32.dp, bottom = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val currentHours = record.obj("sh").optDouble(task.tag, 0.0)
+                    Text("${task.tag} ${hours(currentHours)}h", fontSize = 11.5.sp, color = webColors.sub)
+                    Box(Modifier.clip(RoundedCornerShape(6.dp))
+                        .background(webColors.chipBlue)
+                        .clickable { model.adjustHours(date, task.tag, 0.5) }
+                        .padding(horizontal = 8.dp, vertical = 3.dp)) {
+                        Text("+0.5h", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = webColors.accent)
+                    }
+                }
+            }
             if (task.id == "words") {
-                Row(Modifier.fillMaxWidth().padding(start = 32.dp, top = 8.dp, bottom = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    listOf("n" to "新词", "r" to "复习").forEach { (field, label) ->
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(label, fontSize = 12.sp, color = webColors.sub)
-                            val count = record.obj("w").optInt(field, 0)
-                            AutoSaveInput(model, DraftField.Words(date, field), if (count == 0) "" else count.toString(),
-                                "$label 数量", Modifier.fillMaxWidth(), enabled = enabled, integer = true)
+                Column(Modifier.fillMaxWidth().padding(start = 32.dp, top = 4.dp, bottom = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        listOf("n" to "新词", "r" to "复习").forEach { (field, label) ->
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(label, fontSize = 12.sp, color = webColors.sub)
+                                val count = record.obj("w").optInt(field, 0)
+                                AutoSaveInput(model, DraftField.Words(date, field), if (count == 0) "" else count.toString(),
+                                    "$label 数量", Modifier.fillMaxWidth(), enabled = enabled, integer = true)
+                                if (enabled && date <= model.today) {
+                                    val increments = if (field == "n") listOf(20, 40) else listOf(40, 80)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        increments.forEach { delta ->
+                                            Box(Modifier.clip(RoundedCornerShape(6.dp))
+                                                .background(webColors.bg)
+                                                .border(1.dp, webColors.line, RoundedCornerShape(6.dp))
+                                                .clickable {
+                                                    model.editDay(date) { day ->
+                                                        val w = day.obj("w")
+                                                        w.put(field, (w.optInt(field, 0) + delta).coerceAtMost(5000))
+                                                    }
+                                                }.padding(horizontal = 7.dp, vertical = 2.dp)) {
+                                                Text("+$delta", fontSize = 11.sp, color = webColors.sub, fontWeight = FontWeight.Medium)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -193,10 +230,22 @@ internal fun TodayScreen(model: CheckinViewModel) {
         }
         AddField("添加其他科目", enabled) { subject -> model.setHours(date, subject, 0.0) }
     }
-    Section("三问复盘", badge = "选填") {
-        listOf("g" to "今天最大的收获", "s" to "今天卡住的地方", "n" to "明天第一件事").forEachIndexed { index, (field, title) ->
-            if (index > 0) Spacer(Modifier.height(8.dp))
-            AutoSaveField(model, DraftField.DayReview(date, field), title, record.obj("rw").optString(field), enabled, placeholder = "…")
+    val filledReviewCount = listOf("g", "s", "n").count { record.obj("rw").optString(it).isNotBlank() }
+    var reviewExpanded by rememberSaveable(date) { mutableStateOf(filledReviewCount > 0) }
+    Section {
+        Row(Modifier.fillMaxWidth().heightIn(min = 36.dp).clickable { reviewExpanded = !reviewExpanded },
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("三问复盘", Modifier.weight(1f), fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = webColors.text)
+            Chip(if (filledReviewCount > 0) "已填 $filledReviewCount/3" else "选填",
+                if (filledReviewCount > 0) webColors.accent else webColors.sub,
+                if (filledReviewCount > 0) webColors.chipBlue else webColors.bg)
+        }
+        if (reviewExpanded) {
+            Spacer(Modifier.height(8.dp))
+            listOf("g" to "今天最大的收获", "s" to "今天卡住的地方", "n" to "明天第一件事").forEachIndexed { index, (field, title) ->
+                if (index > 0) Spacer(Modifier.height(8.dp))
+                AutoSaveField(model, DraftField.DayReview(date, field), title, record.obj("rw").optString(field), enabled, placeholder = "…")
+            }
         }
     }
     var stageExpanded by rememberSaveable { mutableStateOf(false) }

@@ -282,6 +282,18 @@ class ProgressForecastTest {
     }
 
     @Test
+    fun subjectWithoutFirstDateFallsBackToChapterDatesWhenPresent() {
+        val forecast = forecastSubject(
+            subject(),
+            subjectState(done = 2, chapterDates = mapOf(0 to "2026-11-02", 1 to "2026-11-10")),
+            date("2026-11-14"),
+        )
+
+        assertTrue(forecast is SubjectForecast.Estimated)
+        assertEquals(date("2026-11-02"), (forecast as SubjectForecast.Estimated).firstDate)
+    }
+
+    @Test
     fun subjectWithoutChaptersIsInsufficient() {
         val forecast = forecastSubject(subject(), subjectState(done = 0, first = "2026-11-01"), date("2026-11-14"))
 

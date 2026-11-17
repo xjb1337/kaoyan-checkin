@@ -91,8 +91,7 @@ class ScreenshotTest {
         val outputDir = File(checkNotNull(System.getProperty("screenshotDir")))
         check(outputDir.isDirectory || outputDir.mkdirs()) { "Cannot create $outputDir" }
         val tabs = listOf(
-            "今日" to "today", "进度" to "prog", "周目标" to "week",
-            "统计" to "stats", "节点" to "mile", "设置" to "set",
+            "今日" to "today", "计划" to "plan", "复盘" to "review", "设置" to "set",
         )
 
         testDatabase.launchActivity().use { scenario ->
@@ -204,18 +203,18 @@ class ScreenshotTest {
             compose.onNodeWithText("今日").performClick()
             compose.onNodeWithText("小时 / 日目标 3.5h").performScrollTo().assertIsDisplayed()
             capture("winter-today")
-            compose.onNodeWithText("周目标").performClick()
+            compose.onNodeWithText("计划").performClick()
             compose.onNodeWithText("打卡达标 0/3 天 · 时长 0.0h / 目标 10.5h").assertIsDisplayed()
             capture("winter-week")
             // Set up a separate presentation fixture without depending on Room's async writer.
             compose.runOnIdle {
                 model.state.obj("ch").put("hum", JSONArray().put(true))
-                model.page = 3
+                model.page = 2
             }
-            compose.onNodeWithText("周目标").performClick()
+            compose.onNodeWithText("计划").performClick()
             compose.onNodeWithText("人文 1/4章", substring = true).performScrollTo().assertIsDisplayed()
             capture("winter-week-humanities")
-            compose.onNodeWithText("统计").performClick()
+            compose.onNodeWithText("复盘").performClick()
             compose.onNodeWithText("近 8 周学习时长").performScrollTo().assertIsDisplayed()
             capture("winter-stats")
             compose.runOnIdle { model.notify("示例提示：已保存学习记录") }
@@ -232,13 +231,12 @@ class ScreenshotTest {
             compose.waitForIdle()
             check(compose.onAllNodesWithText("开营", substring = true).fetchSemanticsNodes().isNotEmpty())
             capture("today-preplan")
-            compose.onNodeWithText("统计").performClick()
+            compose.onNodeWithText("复盘").performClick()
             compose.waitForIdle()
             capture("stats-empty")
             compose.onNodeWithText("多").performScrollTo().assertIsDisplayed()
             compose.waitForIdle()
             capture("stats-heat-empty")
-            compose.onNodeWithText("进度").performClick()
             compose.onNodeWithText("模考 / 真题套卷成绩").performScrollTo().assertIsDisplayed()
             compose.onNodeWithText("记录一次模考").performScrollTo().assertIsDisplayed()
             compose.waitForIdle()

@@ -315,6 +315,7 @@ internal fun forecastSubject(subject: JSONObject, state: JSONObject, today: Loca
     }
 
     val firstDate = parseDate(state.obj("cf").optString(key))
+        ?: datedChapters.minOfOrNull { it.second }
         ?: return SubjectForecast.Insufficient(
             subjectName, done, total, SubjectForecastGap.MISSING_FIRST_DATE, null, null,
         )

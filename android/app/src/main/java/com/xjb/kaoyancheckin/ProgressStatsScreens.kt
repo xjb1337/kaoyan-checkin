@@ -1,10 +1,13 @@
 package com.xjb.kaoyancheckin
 
+import android.app.DatePickerDialog
+import android.content.Context
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -25,6 +28,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -39,6 +44,8 @@ import com.xjb.kaoyancheckin.ui.theme.webColors
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.LocalDate
+import java.util.Calendar
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.roundToInt
@@ -48,6 +55,7 @@ import kotlin.math.roundToInt
 @Composable
 internal fun ProgressScreen(model: CheckinViewModel) {
     val c = webColors
+    val context = LocalContext.current
     val enabled = model.loadError.isEmpty()
     var deleteScoreId by remember { mutableStateOf<String?>(null) }
     var expandedSubjectKey by rememberSaveable { mutableStateOf<String?>(null) }
@@ -70,9 +78,16 @@ internal fun ProgressScreen(model: CheckinViewModel) {
             method = wordForecastMethod(wordForecast), gates = wordForecastGates(wordForecast),
         )
         subjectForecasts.filterNot { it is SubjectForecast.NotStarted }.forEach { forecast ->
+            val missingFirst = forecast is SubjectForecast.Insufficient && forecast.reason == SubjectForecastGap.MISSING_FIRST_DATE
+            val subject = if (missingFirst) model.plan.subjects.firstOrNull { it.getString("name") == forecast.subjectName } else null
             ForecastRow(
                 formatSubjectForecast(forecast), subjectForecastTone(forecast), subjectForecastStatus(forecast),
                 method = subjectForecastMethod(forecast), gates = subjectForecastGates(forecast),
+                onClick = if (enabled && subject != null) ({
+                    showFirstDatePicker(context, subject.getString("s"), model.today) { picked ->
+                        model.setChapterFirstDate(subject, picked)
+                    }
+                }) else null,
             )
         }
         formatUpcomingSubjects(subjectForecasts)?.let { text ->
@@ -138,13 +153,26 @@ internal fun ProgressScreen(model: CheckinViewModel) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(progress.estimate.text, Modifier.weight(1f), color = c.sub, fontSize = 12.sp, lineHeight = 18.sp)
                 progress.estimate.status?.let { status ->
-                    val (fg, bg) = when (progress.estimate.tone) {
-                        ChapterEstimateTone.GOOD -> c.green to c.chipGreen
-                        ChapterEstimateTone.BAD -> c.red to c.chipRed
-                        ChapterEstimateTone.NEUTRAL -> c.sub to c.bg
+                    if (status == "缺首次日期" && enabled) {
+                        Box(Modifier.clip(RoundedCornerShape(6.dp)).clickable {
+                            showFirstDatePicker(context, subject.getString("s"), model.today) { picked ->
+                                model.setChapterFirstDate(subject, picked)
+                            }
+                        }) {
+                            Chip("补录首次日期", c.accent, c.chipBlue)
+                        }
+                    } else {
+                        val (fg, bg) = when (progress.estimate.tone) {
+                            ChapterEstimateTone.GOOD -> c.green to c.chipGreen
+                            ChapterEstimateTone.BAD -> c.red to c.chipRed
+                            ChapterEstimateTone.NEUTRAL -> c.sub to c.bg
+                        }
+                        Chip(status, fg, bg)
                     }
-                    Chip(status, fg, bg)
                 }
+            }
+            if (chapters.length() > 0) {
+                ProgressBar(done.toFloat() / chapters.length(), Modifier.padding(bottom = 8.dp), height = 5.dp)
             }
             if (expanded) chapters.values().forEachIndexed { index, chapter ->
                 val checked = flags.optBoolean(index)
@@ -179,9 +207,13 @@ internal fun ProgressScreen(model: CheckinViewModel) {
             WebButton("记录一次模考", { scope.launch { scoreRequester.bringIntoView() } }, Modifier.fillMaxWidth())
         }
         else {
-            ScoreChart(scores)
-            val last = scores.last()
-            Tip("最近一次：${last.optString("n").ifEmpty { "套卷" }} ${last.getString("d")} · ${last.getDouble("tot")} 分")
+            var selectedScoreIndex by rememberSaveable(scores.size) { mutableStateOf<Int?>(null) }
+            ScoreChart(scores, selectedIndex = selectedScoreIndex, onSelect = { selectedScoreIndex = it })
+            val shown = selectedScoreIndex?.let { scores.getOrNull(it) } ?: scores.last()
+            val prefix = if (selectedScoreIndex != null) "已选" else "最近一次"
+            Tip("$prefix：${shown.optString("n").ifEmpty { "套卷" }} ${shown.getString("d")} · ${shown.getDouble("tot")} 分")
+            val selectedParts = ScoreEntry.describe(shown.obj("p"))
+            if (selectedScoreIndex != null && selectedParts.isNotEmpty()) Tip(selectedParts)
             scores.reversed().forEach { score ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("${score.getString("d")} ${score.optString("n")}", Modifier.weight(1f), fontSize = 13.sp, color = c.text)
@@ -283,6 +315,7 @@ private fun ForecastRow(
     status: String,
     method: String? = null,
     gates: List<String> = emptyList(),
+    onClick: (() -> Unit)? = null,
 ) {
     val c = webColors
     val (color, background) = when (tone) {
@@ -290,8 +323,13 @@ private fun ForecastRow(
         ForecastTone.BAD -> c.red to c.chipRed
         ForecastTone.NEUTRAL -> c.sub to c.bg
     }
+    val rowModifier = if (onClick != null) {
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(vertical = 4.dp)
+    } else {
+        Modifier.fillMaxWidth().padding(vertical = 4.dp)
+    }
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        rowModifier,
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -300,12 +338,28 @@ private fun ForecastRow(
             if (method != null || gates.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                     method?.let { Chip(it, c.sub, c.bg) }
-                    gates.forEach { Chip(it, c.sub, c.bg) }
+                    gates.forEach { Chip(it, if (it == "缺首次日期" && onClick != null) c.accent else c.sub,
+                        if (it == "缺首次日期" && onClick != null) c.chipBlue else c.bg) }
                 }
             }
         }
         Chip(status, color, background)
     }
+}
+
+private fun showFirstDatePicker(context: Context, defaultDate: String, maxDate: String, onPicked: (String) -> Unit) {
+    val limit = LocalDate.parse(maxDate)
+    val initial = LocalDate.parse(defaultDate).let { if (it > limit) limit else it }
+    val dialog = DatePickerDialog(context, { _, year, month, day ->
+        val picked = LocalDate.of(year, month + 1, day)
+        if (picked <= limit) onPicked(picked.toString())
+    }, initial.year, initial.monthValue - 1, initial.dayOfMonth)
+    val maximum = Calendar.getInstance().apply {
+        clear()
+        set(limit.year, limit.monthValue - 1, limit.dayOfMonth)
+    }
+    dialog.datePicker.maxDate = maximum.timeInMillis
+    dialog.show()
 }
 
 private fun wordForecastStatus(forecast: WordForecast): String = when (forecast) {
@@ -374,7 +428,7 @@ private fun hoursForecastGates(forecast: HoursForecast): List<String> =
     if (forecast is HoursForecast.Insufficient) listOf("${forecast.activeDays}/$MIN_HOURS_ACTIVE_DAYS 天") else emptyList()
 
 @Composable
-private fun ScoreChart(scores: List<JSONObject>) {
+private fun ScoreChart(scores: List<JSONObject>, selectedIndex: Int? = null, onSelect: ((Int) -> Unit)? = null) {
     val c = webColors
     val textMeasurer = rememberTextMeasurer()
     val tickStyle = TextStyle(color = c.sub, fontSize = 9.sp)
@@ -382,7 +436,20 @@ private fun ScoreChart(scores: List<JSONObject>) {
     val referenceStyle = TextStyle(color = c.orange, fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold)
     val ticks = ScoreChartMath.axisScores.map { it to textMeasurer.measure("$it", style = tickStyle) }
     val referenceLabel = textMeasurer.measure(referenceText, style = referenceStyle)
-    Canvas(Modifier.fillMaxWidth().aspectRatio(ScoreChartMath.VIEW_WIDTH / ScoreChartMath.VIEW_HEIGHT)) {
+    val tapModifier = if (onSelect != null && scores.isNotEmpty()) {
+        Modifier.pointerInput(scores) {
+            detectTapGestures { offset ->
+                val points = ScoreChartMath.points(scores.map { it.optDouble("tot") }, size.width.toFloat(), size.height.toFloat())
+                val nearest = points.withIndex().minByOrNull { (_, p) ->
+                    val dx = p.x - offset.x
+                    val dy = p.y - offset.y
+                    dx * dx + dy * dy
+                }
+                if (nearest != null) onSelect(nearest.index)
+            }
+        }
+    } else Modifier
+    Canvas(Modifier.fillMaxWidth().aspectRatio(ScoreChartMath.VIEW_WIDTH / ScoreChartMath.VIEW_HEIGHT).then(tapModifier)) {
         val left = size.width * ScoreChartMath.PLOT_LEFT / ScoreChartMath.VIEW_WIDTH
         val right = size.width - size.width * ScoreChartMath.PLOT_RIGHT / ScoreChartMath.VIEW_WIDTH
         ticks.forEach { (value, label) ->
@@ -405,9 +472,12 @@ private fun ScoreChart(scores: List<JSONObject>) {
         points.zipWithNext().forEach { (a, b) ->
             drawLine(c.blue, Offset(a.x, a.y), Offset(b.x, b.y), 2.dp.toPx(), cap = StrokeCap.Round)
         }
-        points.forEach { point ->
-            drawCircle(if (ScoreChartMath.meetsReference(point.score)) c.green else c.red,
-                3.5.dp.toPx(), Offset(point.x, point.y))
+        points.forEachIndexed { index, point ->
+            val pointColor = if (ScoreChartMath.meetsReference(point.score)) c.green else c.red
+            if (index == selectedIndex) {
+                drawCircle(pointColor.copy(alpha = 0.25f), 7.dp.toPx(), Offset(point.x, point.y))
+            }
+            drawCircle(pointColor, if (index == selectedIndex) 4.5.dp.toPx() else 3.5.dp.toPx(), Offset(point.x, point.y))
         }
     }
 }

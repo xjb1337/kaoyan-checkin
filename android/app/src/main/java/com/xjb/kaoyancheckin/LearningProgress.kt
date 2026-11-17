@@ -89,3 +89,9 @@ internal fun toggleChapter(state: JSONObject, subject: JSONObject, index: Int, t
     if (dates.length() == 0) state.obj("cd").remove(key) else state.obj("cd").put(key, dates)
     return state
 }
+
+internal fun setChapterFirstDate(state: JSONObject, key: String, date: String): JSONObject {
+    require(CheckinCore.validDate(date)) { "日期无效" }
+    state.obj("cf").put(key, date)
+    return state
+}

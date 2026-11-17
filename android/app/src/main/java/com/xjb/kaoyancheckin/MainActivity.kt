@@ -157,11 +157,11 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
                     .padding(horizontal = 12.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (model.loadError.isNotEmpty()) Section("存档读取异常") {
                         Text(model.loadError, color = c.red)
-                        WebButton("前往设置，导出原始存档或恢复", { model.page = 5 })
+                        WebButton("前往设置，导出原始存档或恢复", { model.page = 3 })
                     }
-                    if (!CheckinCore.hasData(model.state) && model.page != 5 && !onboardingDismissed) Section("开始使用") {
+                    if (!CheckinCore.hasData(model.state) && model.page != 3 && !onboardingDismissed) Section("开始使用") {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            WebButton("导入网页备份", { model.page = 5 }, Modifier.weight(1f), big = true)
+                            WebButton("导入网页备份", { model.page = 3 }, Modifier.weight(1f), big = true)
                             WebButton("直接开始打卡", {
                                 onboardingDismissed = true
                                 model.page = 0
@@ -170,10 +170,14 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
                     }
                     when (model.page) {
                         0 -> TodayScreen(model)
-                        1 -> ProgressScreen(model)
-                        2 -> WeekScreen(model)
-                        3 -> StatsScreen(model)
-                        4 -> MilestonesScreen(model)
+                        1 -> {
+                            WeekScreen(model)
+                            MilestonesScreen(model)
+                        }
+                        2 -> {
+                            ProgressScreen(model)
+                            StatsScreen(model)
+                        }
                         else -> SettingsScreen(model, updates, appearance)
                     }
                 }
@@ -212,9 +216,8 @@ private fun Header(model: CheckinViewModel) {
 
 @Composable
 internal fun TabBar(selected: Int, onSelect: (Int) -> Unit) {
-    val labels = listOf("今日", "进度", "周目标", "统计", "节点", "设置")
-    val icons = listOf(R.drawable.tab_today, R.drawable.tab_progress, R.drawable.tab_week,
-        R.drawable.tab_stats, R.drawable.tab_milestones, R.drawable.tab_settings)
+    val labels = listOf("今日", "计划", "复盘", "设置")
+    val icons = listOf(R.drawable.tab_today, R.drawable.tab_week, R.drawable.tab_progress, R.drawable.tab_settings)
     val c = webColors
     Column(Modifier.fillMaxWidth().background(c.card), horizontalAlignment = Alignment.CenterHorizontally) {
         Divider()

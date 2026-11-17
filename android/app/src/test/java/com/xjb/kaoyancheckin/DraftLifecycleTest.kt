@@ -68,7 +68,7 @@ class DraftLifecycleTest {
                 model.updateDraft(DraftField.Words(date, "r"), "80")
                 model.editDay(date) { it.obj("t").put("words", true) }
                 model.makeup("2026-11-08")
-                model.page = 2
+                model.page = 1
                 model.updateDraft(DraftField.WeekGoal(week, 0), "本周目标")
                 model.updateDraft(DraftField.WeekReview(week), "周日复盘")
                 model.editWeek(week) { it.arr("md").put(0, true) }
@@ -99,7 +99,7 @@ class DraftLifecycleTest {
             val model = awaitReady(scenario)
             val field = DraftField.DayReview("2026-11-10", "g")
             scenario.onActivity { activity ->
-                model.page = 5
+                model.page = 3
                 model.updateDraft(field, "切换主题前的草稿")
                 val appearance = ViewModelProvider(activity)[ThemeViewModel::class.java]
                 assertEquals(AppTheme.WEB_BLUE, appearance.theme)
@@ -113,7 +113,7 @@ class DraftLifecycleTest {
             shadowOf(Looper.getMainLooper()).idle()
             scenario.onActivity { activity ->
                 assertSame(model, ViewModelProvider(activity)[CheckinViewModel::class.java])
-                assertEquals(5, model.page)
+                assertEquals(3, model.page)
                 val saved = model.state.obj("days").obj("2026-11-10").obj("rw").optString("g")
                 assertEquals("切换主题前的草稿", model.draftValue(field, saved))
                 assertEquals(AppTheme.BAMBOO_GREEN, ThemeRepository(activity).load())
@@ -136,7 +136,7 @@ class DraftLifecycleTest {
             }
 
             scenario.onActivity {
-                model.page = 2
+                model.page = 1
                 model.updateDraft(DraftField.WeekGoal(week, 0), "刚输入的目标")
                 model.copyPreviousWeekGoals(week)
                 model.editWeek(week) { it.arr("md").put(0, true) }

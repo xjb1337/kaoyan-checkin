@@ -281,6 +281,13 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
         change { state -> toggleChapter(state, subject, index, current) }
     }
 
+    fun setChapterFirstDate(subject: JSONObject, date: String) {
+        val current = currentDay()
+        if (date <= current) {
+            change { state -> setChapterFirstDate(state, subject.getString("k"), date) }
+        }
+    }
+
     fun retireTask(name: String) = edit { current ->
         current.put("recur", JSONArray(current.arr("recur").values().filter { it != name }))
     }

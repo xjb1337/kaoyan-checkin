@@ -9,6 +9,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.graphics.Paint
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
@@ -149,8 +150,10 @@ class CheckinWidget : AppWidgetProvider() {
                     tasks.forEach { task ->
                         val item = RemoteViews(context.packageName, R.layout.checkin_widget_task)
                         item.setImageViewBitmap(R.id.widget_check, if (task.done) checked else unchecked)
-                        item.setTextViewText(R.id.widget_task_text, task.label)
+                        item.setTextViewText(R.id.widget_task_text, if (task.minimum) "★ ${task.label}" else task.label)
                         item.setTextColor(R.id.widget_task_text, (if (task.done) c.sub else c.text).toArgb())
+                        item.setInt(R.id.widget_task_text, "setPaintFlags",
+                            if (task.done) Paint.ANTI_ALIAS_FLAG or Paint.STRIKE_THRU_TEXT_FLAG else Paint.ANTI_ALIAS_FLAG)
                         item.setContentDescription(R.id.widget_task, "${task.label}，${if (task.done) "已完成，点击取消" else "未完成，点击完成"}")
                         val intent = Intent(context, WidgetActionReceiver::class.java).setAction(TOGGLE)
                             .setData(Uri.Builder().scheme("checkin").authority("widget").appendPath(widgetId.toString())
