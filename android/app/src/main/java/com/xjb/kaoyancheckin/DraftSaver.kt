@@ -55,7 +55,8 @@ internal fun patchDraft(state: JSONObject, field: DraftField, value: String, tod
             val existing = days.optJSONObject(field.date)
             val day = existing ?: StudyPlan.day()
             // setHours validates the number and the total against the latest day's other subjects.
-            val updated = CheckinCore.setHours(day, field.subject, value.toDoubleOrNull() ?: Double.NaN)
+            val parsedHours = if (value.isBlank()) 0.0 else value.toDoubleOrNull() ?: Double.NaN
+            val updated = CheckinCore.setHours(day, field.subject, parsedHours)
             if (updated.obj("sh").getDouble(field.subject) == day.obj("sh").optDouble(field.subject, 0.0)) return null
             updated.put("u", now)
             days.put(field.date, updated)
@@ -108,12 +109,24 @@ internal class DraftSaver(
         val draft = drafts[field] ?: return null
         saving[field]?.let { if (it.revision == draft.revision && it.job.isActive) return it.job }
         val job = scope.launch(start = CoroutineStart.LAZY) {
-            if (save(field, draft.value) && drafts[field]?.revision == draft.revision) drafts.remove(field)
+            save(field, draft.value)
+            if (drafts[field]?.revision == draft.revision) drafts.remove(field)
         }
         saving[field] = Saving(draft.revision, job)
         job.invokeOnCompletion { if (saving[field]?.job === job) saving.remove(field) }
         job.start()
         return job
+    }
+
+    fun clear(field: DraftField) {
+        timers.remove(field)?.cancel()
+        drafts.remove(field)
+    }
+
+    fun clearAll() {
+        timers.values.forEach { it.cancel() }
+        timers.clear()
+        drafts.clear()
     }
 
     fun flushAll() {

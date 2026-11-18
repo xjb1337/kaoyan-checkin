@@ -56,14 +56,25 @@ class DraftSaverTest {
         assertEquals(3, writes.size)
     }
 
-    @Test fun failureKeepsTheDraftAndFlushCanRetry() = runTest {
+    @Test fun failureDiscardsFailedDraftInsteadOfRetryingForever() = runTest {
         var attempts = 0
-        val saver = DraftSaver(this, save = { _, _ -> ++attempts > 1 })
-        saver.update(field, "还没写入")
+        val saver = DraftSaver(this, save = { _, _ -> attempts++; false })
+        saver.update(field, "非法输入")
         saver.flush(field)!!.join()
-        assertEquals("还没写入", saver.value(field, "旧值"))
-        saver.flush(field)!!.join()
-        assertEquals(2, attempts)
+        assertEquals(1, attempts)
+        assertEquals("旧值", saver.value(field, "旧值"))
+        assertNull(saver.flush(field))
+        assertEquals(1, attempts)
+    }
+
+    @Test fun clearAllCancelsTimersAndDiscardsPendingDrafts() = runTest {
+        val writes = mutableListOf<String>()
+        val saver = DraftSaver(this, save = { _, value -> writes.add(value); true })
+        saver.update(field, "待清空")
+        saver.clearAll()
+        advanceTimeBy(1000)
+        runCurrent()
+        assertTrue(writes.isEmpty())
         assertEquals("已保存", saver.value(field, "已保存"))
     }
 

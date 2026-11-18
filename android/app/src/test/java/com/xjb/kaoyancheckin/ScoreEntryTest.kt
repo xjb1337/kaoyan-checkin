@@ -11,22 +11,24 @@ class ScoreEntryTest {
     private fun base() = JSONObject("""{"days":{},"weeks":{},"recur":[],"scores":[],"ch":{},"mk":[],"settings":{"exam":"2027-12-25"},"upd":0,"bk":0,"tip":0}""")
 
     @Test fun subjectKeysMatchWebExportAndDisplayInChinese() {
-        assertEquals(listOf("phys", "bioc", "path", "med", "surg"), ScoreEntry.subjects.map { it.key })
+        assertEquals(listOf("phys", "bioc", "path", "med", "surg", "hum"), ScoreEntry.subjects.map { it.key })
         assertEquals("生理", ScoreEntry.label("phys"))
         assertEquals("外科", ScoreEntry.label("surg"))
+        assertEquals("人文", ScoreEntry.label("hum"))
     }
 
     @Test fun normalizePartsKeepsOnlyFilledSubjects() {
         val parts = ScoreEntry.normalizeParts(
-            mapOf("phys" to "80", "bioc" to " 62.5 ", "path" to "", "med" to "90", "surg" to "0"),
-            232.5,
+            mapOf("phys" to "80", "bioc" to " 62.5 ", "path" to "", "med" to "90", "surg" to "0", "hum" to "15"),
+            247.5,
         )
         assertEquals(80.0, parts.getDouble("phys"), 0.0)
         assertEquals(62.5, parts.getDouble("bioc"), 0.0)
         assertFalse(parts.has("path"))
         assertEquals(90.0, parts.getDouble("med"), 0.0)
         assertEquals(0.0, parts.getDouble("surg"), 0.0)
-        assertEquals("生理 80 / 生化 62.5 / 内科 90 / 外科 0", ScoreEntry.describe(parts))
+        assertEquals(15.0, parts.getDouble("hum"), 0.0)
+        assertEquals("生理 80 / 生化 62.5 / 内科 90 / 外科 0 / 人文 15", ScoreEntry.describe(parts))
     }
 
     @Test fun emptyPartsRemainAnEmptyObject() {

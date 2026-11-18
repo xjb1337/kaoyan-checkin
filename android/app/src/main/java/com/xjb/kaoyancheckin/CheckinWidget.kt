@@ -42,10 +42,10 @@ internal object WidgetRefresh {
         val alarm = context.getSystemService(AlarmManager::class.java)
         val whenMillis = nextShanghaiMidnight(Instant.now()).toEpochMilli()
         try {
-            alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, whenMillis, alarmIntent(context))
+            alarm.setExactAndAllowWhileIdle(AlarmManager.RTC, whenMillis, alarmIntent(context))
         } catch (_: SecurityException) {
-            // Devices may deny exact alarms; still request the closest available wakeup.
-            alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, whenMillis, alarmIntent(context))
+            // Devices may deny exact alarms; still request the closest available non-wakeup alarm.
+            alarm.setAndAllowWhileIdle(AlarmManager.RTC, whenMillis, alarmIntent(context))
         }
     }
 
@@ -87,11 +87,22 @@ class CheckinWidget : AppWidgetProvider() {
                 val plan = StudyPlan(JSONObject(context.assets.open("plan.json").bufferedReader().use { it.readText() }))
                 widgetSnapshot(plan, state, CheckinCore.today())
             }.getOrNull()
+            val landscape = context.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
             ids.forEach { id ->
                 val options = manager.getAppWidgetOptions(id)
-                manager.updateAppWidget(id, views(context, id, snapshot,
-                    options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 250).takeIf { it > 0 } ?: 250,
-                    options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 110).takeIf { it > 0 } ?: 110))
+                val width = if (landscape) {
+                    options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 0).takeIf { it > 0 }
+                        ?: options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 250).takeIf { it > 0 } ?: 250
+                } else {
+                    options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 250).takeIf { it > 0 } ?: 250
+                }
+                val height = if (landscape) {
+                    options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 110).takeIf { it > 0 } ?: 110
+                } else {
+                    options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0).takeIf { it > 0 }
+                        ?: options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 110).takeIf { it > 0 } ?: 110
+                }
+                manager.updateAppWidget(id, views(context, id, snapshot, width, height))
             }
         }
 
@@ -122,7 +133,7 @@ class CheckinWidget : AppWidgetProvider() {
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             val openIntent = PendingIntent.getActivity(context, widgetId, open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.widget_root, openIntent)
-            views.setImageViewBitmap(R.id.widget_backdrop, WidgetArtwork.backdrop(width, height, density, c))
+            views.setInt(R.id.widget_backdrop, "setColorFilter", c.card.toArgb())
             views.setImageViewBitmap(R.id.widget_header_bg, WidgetArtwork.header(width, density, c, status, snapshot?.satisfied == true))
             views.setImageViewBitmap(R.id.widget_streak_bg, WidgetArtwork.badge(density, c))
             views.setTextViewText(R.id.widget_streak, snapshot?.let { "连续 ${it.streak} 天" } ?: "打开应用")
@@ -137,8 +148,15 @@ class CheckinWidget : AppWidgetProvider() {
             views.setTextColor(R.id.widget_empty, (if (snapshot == null) c.red else c.sub).toArgb())
             views.setViewVisibility(R.id.widget_title, if (layout.showTitle) View.VISIBLE else View.GONE)
             views.removeAllViews(R.id.widget_tasks)
-            val visibleTasks = if (layout.compact) emptyList() else snapshot?.tasks.orEmpty().take(layout.columns * layout.maxRows)
+            val allTasks = snapshot?.tasks.orEmpty()
+            val visibleTasks = if (layout.compact) emptyList() else allTasks.take(layout.columns * layout.maxRows)
+            val hiddenCount = if (layout.compact) 0 else (allTasks.size - visibleTasks.size).coerceAtLeast(0)
             views.setViewVisibility(R.id.widget_tasks, if (visibleTasks.isNotEmpty()) View.VISIBLE else View.GONE)
+            views.setViewVisibility(R.id.widget_overflow, if (hiddenCount > 0) View.VISIBLE else View.GONE)
+            if (hiddenCount > 0) {
+                views.setTextViewText(R.id.widget_overflow, "还有 $hiddenCount 项 ›")
+                views.setTextColor(R.id.widget_overflow, c.sub.toArgb())
+            }
             val showEmpty = !layout.compact && visibleTasks.isEmpty()
             views.setViewVisibility(R.id.widget_empty, if (showEmpty) View.VISIBLE else View.GONE)
             if (showEmpty) views.setTextViewText(R.id.widget_empty, widgetEmptyLabel(snapshot))
@@ -162,6 +180,9 @@ class CheckinWidget : AppWidgetProvider() {
                             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                         row.addView(R.id.widget_row, item)
                     }
+                    if (layout.columns == 2 && tasks.size == 1) {
+                        row.addView(R.id.widget_row, RemoteViews(context.packageName, R.layout.checkin_widget_task_spacer))
+                    }
                     views.addView(R.id.widget_tasks, row)
                 }
             }
@@ -184,10 +205,19 @@ class WidgetActionReceiver : BroadcastReceiver() {
             try {
                 val plan = StudyPlan(JSONObject(context.assets.open("plan.json").bufferedReader().use { it.readText() }))
                 toggleWidgetTask(CheckinRepository.get(context), plan, date, id)
+                WidgetNotice.clear(context)
             } catch (e: Exception) {
-                WidgetNotice.post(context, "小组件未保存，请打开应用检查存档")
+                val msg = (e as? IllegalArgumentException)?.message?.takeIf { it.isNotBlank() }
+                    ?: "小组件未保存，请打开应用检查存档"
+                WidgetNotice.post(context, msg)
             } finally {
-                try { CheckinWidget.refreshAll(context) } finally { pending.finish() }
+                try {
+                    val manager = AppWidgetManager.getInstance(context)
+                    val ids = manager.getAppWidgetIds(ComponentName(context, CheckinWidget::class.java))
+                    if (ids.isNotEmpty()) CheckinWidget.render(context, manager, ids)
+                } finally {
+                    pending.finish()
+                }
             }
         }
     }
@@ -197,6 +227,9 @@ class WidgetClockReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action !in setOf(MIDNIGHT, Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_DATE_CHANGED,
                 Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED)) return
+        if (intent.action == MIDNIGHT || intent.action == Intent.ACTION_DATE_CHANGED) {
+            runCatching { WidgetNotice.clear(context) }
+        }
         runCatching { WidgetRefresh.schedule(context) }
         runCatching { CheckinWidget.refreshAll(context) }
     }

@@ -1,6 +1,7 @@
 package com.xjb.kaoyancheckin
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.json.JSONArray
@@ -37,6 +38,7 @@ object CheckinCore {
         if (value !is Number) return false
         return integerTextIn(value.toString(), min, max)
     }
+    private fun JSONObject.hasValue(key: String): Boolean = has(key) && !isNull(key)
     private fun nullish(value: Any?, default: Any): Any = if (value == null || value === JSONObject.NULL) default else value
     private fun truthy(value: Any?): Boolean = when (value) {
         null, JSONObject.NULL, false, "" -> false
@@ -84,11 +86,13 @@ object CheckinCore {
         if (value !is JSONObject) return false
         val tasks = fallback(value.opt("t"), JSONObject())
         val custom = fallback(value.opt("c"), JSONArray())
+        val skipped = fallback(value.opt("sk"), JSONArray())
         val hours = fallback(value.opt("sh"), JSONObject())
         val review = fallback(value.opt("rw"), JSONObject())
-        val words = if (value.has("w")) value.opt("w") else JSONObject()
+        val words = nullish(value.opt("w"), JSONObject())
         return tasks is JSONObject && tasks.namesList().all { tasks.get(it) is Boolean } &&
             custom is JSONArray && custom.values().all(::task) &&
+            skipped is JSONArray && skipped.values().all { text(it) } &&
             number(nullish(value.opt("h"), 0)) && number(nullish(value.opt("u"), 0)) &&
             hours is JSONObject && hours.namesList().all { text(it) && number(hours.get(it)) } &&
             review is JSONObject && listOf("g", "s", "n").all { text(nullish(review.opt(it), "")) } &&
@@ -145,13 +149,14 @@ object CheckinCore {
     fun normalizeState(raw: Any?): JSONObject {
         if (raw !is JSONObject || raw.opt("days") !is JSONObject) fail("不是有效的打卡备份（缺少 days）")
         safeKeys(raw)
-        if (raw.has("schemaVersion") && (raw.opt("schemaVersion") !is Number || raw.optDouble("schemaVersion") !in listOf(1.0, 2.0))) {
+        if (raw.hasValue("schemaVersion") && (raw.opt("schemaVersion") !is Number || raw.optDouble("schemaVersion") !in listOf(1.0, 2.0))) {
             fail("备份版本较新，请先更新应用")
         }
         val weeks = fallback(raw.opt("weeks"), JSONObject())
         recordMap(raw.get("days"), ::validDay, "每日数据")
         recordMap(weeks, ::validWeek, "周目标")
         val recur = nullish(raw.opt("recur"), JSONArray())
+        val recurFrom = nullish(raw.opt("recurFrom"), JSONObject())
         val scores = nullish(raw.opt("scores"), JSONArray())
         val chapters = nullish(raw.opt("ch"), JSONObject())
         val firstChapters = nullish(raw.opt("cf"), JSONObject())
@@ -160,6 +165,7 @@ object CheckinCore {
         val makeup = nullish(raw.opt("mk"), JSONArray())
         val settings = nullish(raw.opt("settings"), JSONObject())
         if (recur !is JSONArray || !recur.values().all { text(it) }) fail("固定任务格式错误")
+        if (recurFrom !is JSONObject || !recurFrom.namesList().all { text(it) && validDate(recurFrom.opt(it)) }) fail("固定任务格式错误")
         if (scores !is JSONArray || !scores.values().all(::validScore)) fail("模考成绩格式错误")
         if (chapters !is JSONObject || !chapters.namesList().all { key ->
                 val chapter = chapters.opt(key)
@@ -175,13 +181,16 @@ object CheckinCore {
                 }
             }) fail("章节日期格式错误")
         if (makeup !is JSONArray || !makeup.values().all(::validDate)) fail("补签日期格式错误")
-        if (settings !is JSONObject || !validDate(fallback(settings.opt("exam"), "2027-12-25"))) fail("初试日期格式错误")
-        if (settings.has("backupDays") && (settings.opt("backupDays") !is Number || settings.optDouble("backupDays") !in listOf(7.0, 14.0, 30.0))) {
+        val examDate = if (settings is JSONObject) fallback(settings.opt("exam"), "2027-12-25") else null
+        if (settings !is JSONObject || !validDate(examDate) || (examDate as String) < "2026-11-02" || examDate > "2028-08-31") {
+            fail("初试日期格式错误")
+        }
+        if (settings.hasValue("backupDays") && (settings.opt("backupDays") !is Number || settings.optDouble("backupDays") !in listOf(7.0, 14.0, 30.0))) {
             fail("备份周期格式错误")
         }
         if (settings.has("wordBase") && !integerIn(settings.opt("wordBase"), 0, 20000)) fail("单词基数须为 0–20000 的整数")
         if (settings.has("wordGoal") && !integerIn(settings.opt("wordGoal"), 1, 50000)) fail("单词目标须为 1–50000 的整数")
-        if (raw.has("_recovery") && !text(raw.opt("_recovery"))) fail("恢复副本格式错误")
+        if (raw.hasValue("_recovery") && !text(raw.opt("_recovery"))) fail("恢复副本格式错误")
         if (!number(nullish(raw.opt("upd"), 0)) || !number(nullish(raw.opt("bk"), 0))) fail("备份时间格式错误")
         val days = JSONObject()
         raw.obj("days").namesList().forEach { date ->
@@ -192,7 +201,11 @@ object CheckinCore {
                 .put("rw", JSONObject().put("g", nullish(review.opt("g"), nullish(source.opt("note"), "")))
                     .put("s", nullish(review.opt("s"), "")).put("n", nullish(review.opt("n"), "")))
                 .put("u", fallback(source.opt("u"), 0))
-            if (source.has("w")) record.put("w", JSONObject().put("n", source.obj("w").optInt("n", 0)).put("r", source.obj("w").optInt("r", 0)))
+            if (source.hasValue("w")) record.put("w", JSONObject().put("n", source.obj("w").optInt("n", 0)).put("r", source.obj("w").optInt("r", 0)))
+            if (source.hasValue("sk")) {
+                val skipped = source.arr("sk").values().filterIsInstance<String>().filter { it.isNotEmpty() }.distinct()
+                if (skipped.isNotEmpty()) record.put("sk", JSONArray(skipped))
+            }
             days.put(date, normalizeHours(record))
         }
         val normalizedChapterDates = JSONObject()
@@ -208,6 +221,11 @@ object CheckinCore {
             }
             if (kept.length() > 0) normalizedChapterDates.put(key, kept)
         }
+        val recurNames = recur.values().filterIsInstance<String>().toSet()
+        val normalizedRecurFrom = JSONObject()
+        recurFrom.namesList().forEach { name ->
+            if (name in recurNames) normalizedRecurFrom.put(name, recurFrom.getString(name))
+        }
         val result = JSONObject().put("schemaVersion", 2).put("days", days).put("weeks", JSONObject(weeks.toString()))
             .put("recur", JSONArray(recur.toString())).put("scores", JSONArray(scores.toString()))
             .put("ch", chapters.copyJson()).put("cf", (firstChapters as JSONObject).copyJson())
@@ -219,6 +237,7 @@ object CheckinCore {
                 .put("wordGoal", settings.optInt("wordGoal", DEFAULT_WORD_GOAL)))
             .put("upd", fallback(raw.opt("upd"), 0)).put("bk", fallback(raw.opt("bk"), 0))
             .put("tip", if (truthy(raw.opt("tip"))) 1 else 0)
+        if (normalizedRecurFrom.length() > 0) result.put("recurFrom", normalizedRecurFrom)
         if (truthy(raw.opt("_recovery"))) result.put("_recovery", raw.get("_recovery"))
         // Short-lived local undo metadata is never part of an exported backup.
         raw.optJSONObject("_undo")?.let { if (UndoStep.fromJson(it) != null) result.put("_undo", it.copyJson()) }
@@ -242,12 +261,34 @@ object CheckinCore {
         return normalized.put("sh", hours).put("h", total)
     }
 
-    fun hasData(state: JSONObject): Boolean = state.obj("days").namesList().any { date ->
-        val record = state.obj("days").obj(date)
-        truthy(record.opt("h")) || record.obj("t").namesList().any { truthy(record.obj("t").get(it)) } ||
-            record.obj("w").optInt("n", 0) > 0 || record.obj("w").optInt("r", 0) > 0 ||
-            record.arr("c").length() > 0 || record.obj("rw").namesList().any { truthy(record.obj("rw").get(it)) }
-    } || state.obj("weeks").length() > 0 || state.arr("scores").length() > 0 || state.obj("ch").length() > 0 || state.arr("recur").length() > 0
+    fun hasData(state: JSONObject): Boolean {
+        val hasDayData = state.obj("days").namesList().any { date ->
+            val record = state.obj("days").obj(date)
+            truthy(record.opt("h")) || record.obj("t").namesList().any { truthy(record.obj("t").get(it)) } ||
+                record.obj("w").optInt("n", 0) > 0 || record.obj("w").optInt("r", 0) > 0 ||
+                record.arr("c").length() > 0 || record.obj("rw").namesList().any { truthy(record.obj("rw").get(it)) }
+        }
+        if (hasDayData) return true
+        val hasWeekData = state.obj("weeks").namesList().any { week ->
+            val record = state.obj("weeks").obj(week)
+            record.arr("must").values().any { truthy(it) } ||
+                record.arr("md").values().any { truthy(it) } ||
+                record.arr("ex").length() > 0 ||
+                truthy(record.opt("review"))
+        }
+        if (hasWeekData) return true
+        if (state.arr("scores").length() > 0 || state.arr("recur").length() > 0 || state.arr("mk").length() > 0) return true
+        val hasChapterData = state.obj("ch").namesList().any { key ->
+            val flags = state.obj("ch").arr(key)
+            (0 until flags.length()).any { flags.optBoolean(it) }
+        } || state.obj("cf").length() > 0 || state.obj("ce").length() > 0 || state.obj("cd").length() > 0
+        if (hasChapterData) return true
+        val settings = state.optJSONObject("settings") ?: return false
+        return (settings.hasValue("exam") && settings.optString("exam", "2027-12-25") != "2027-12-25") ||
+            (settings.hasValue("backupDays") && settings.optInt("backupDays", 7) != 7) ||
+            (settings.hasValue("wordBase") && settings.optInt("wordBase", DEFAULT_WORD_BASE) != DEFAULT_WORD_BASE) ||
+            (settings.hasValue("wordGoal") && settings.optInt("wordGoal", DEFAULT_WORD_GOAL) != DEFAULT_WORD_GOAL)
+    }
 
     fun needsBackup(state: JSONObject, now: Long): Boolean = hasData(state) &&
         (!truthy(state.opt("bk")) || (now - state.optDouble("bk", 0.0)) / 86_400_000 >= state.obj("settings").optInt("backupDays", 7))
@@ -259,55 +300,192 @@ object CheckinCore {
         if (optJSONObject("cd") == null) put("cd", JSONObject())
     }.toString()
 
-    fun mergeState(current: JSONObject, incoming: JSONObject): JSONObject {
+    private data class IncomingPresence(
+        val hasCf: Boolean,
+        val hasCe: Boolean,
+        val hasCd: Boolean,
+        val hasWordBase: Boolean,
+        val hasWordGoal: Boolean,
+        val daysWithWords: Set<String>,
+    )
+
+    private fun detectPresence(raw: String): IncomingPresence? {
+        val parsed = runCatching { Json.parseToJsonElement(raw) }.getOrNull() as? JsonObject ?: return null
+        val settings = parsed["settings"] as? JsonObject
+        val days = (parsed["days"] as? JsonObject)?.entries
+            ?.filter { (_, value) -> (value as? JsonObject)?.get("w").let { it != null && it !is JsonNull } }
+            ?.map { it.key }
+            ?.toSet()
+            ?: emptySet()
+        return IncomingPresence(
+            hasCf = parsed["cf"].let { it != null && it !is JsonNull },
+            hasCe = parsed["ce"].let { it != null && it !is JsonNull },
+            hasCd = parsed["cd"].let { it != null && it !is JsonNull },
+            hasWordBase = settings?.get("wordBase").let { it != null && it !is JsonNull },
+            hasWordGoal = settings?.get("wordGoal").let { it != null && it !is JsonNull },
+            daysWithWords = days,
+        )
+    }
+
+    fun mergeState(current: JSONObject, incoming: JSONObject): JSONObject =
+        mergeStateTracked(current, incoming, null).first
+
+    private fun mergeStateTracked(
+        current: JSONObject,
+        incoming: JSONObject,
+        presence: IncomingPresence?,
+    ): Pair<JSONObject, Boolean> {
         val out = current.copyJson()
         var changed = false
-        listOf("days", "weeks").forEach { field ->
-            incoming.obj(field).namesList().forEach { date ->
-                val next = incoming.obj(field).obj(date)
-                val old = out.obj(field).optJSONObject(date)
-                if (old == null || old.optDouble("u", 0.0) < next.optDouble("u", 0.0)) {
-                    out.obj(field).put(date, next.copyJson())
+        val incomingNewer = incoming.optDouble("upd", 0.0) > current.optDouble("upd", 0.0)
+
+        incoming.obj("days").namesList().forEach { date ->
+            val next = incoming.obj("days").obj(date)
+            val old = out.obj("days").optJSONObject(date)
+            if (old == null || old.optDouble("u", 0.0) < next.optDouble("u", 0.0)) {
+                val mergedDay = next.copyJson()
+                if (presence != null && date !in presence.daysWithWords && old != null && old.hasValue("w")) {
+                    mergedDay.put("w", old.obj("w").copyJson())
+                }
+                out.obj("days").put(date, mergedDay)
+                changed = true
+            }
+        }
+        incoming.obj("weeks").namesList().forEach { week ->
+            val next = incoming.obj("weeks").obj(week)
+            val old = out.obj("weeks").optJSONObject(week)
+            if (old == null || old.optDouble("u", 0.0) < next.optDouble("u", 0.0)) {
+                out.obj("weeks").put(week, next.copyJson())
+                changed = true
+            }
+        }
+
+        // Merge scores by id.
+        val scoreList = mutableListOf<JSONObject>()
+        val scoreIndexById = mutableMapOf<String, Int>()
+        current.arr("scores").values().filterIsInstance<JSONObject>().forEach { item ->
+            val id = item.optString("id")
+            scoreIndexById[id] = scoreList.size
+            scoreList.add(item.copyJson())
+        }
+        incoming.arr("scores").values().filterIsInstance<JSONObject>().forEach { item ->
+            val id = item.optString("id")
+            val existingIdx = scoreIndexById[id]
+            if (existingIdx == null) {
+                scoreIndexById[id] = scoreList.size
+                scoreList.add(item.copyJson())
+                changed = true
+            } else if (incomingNewer && !sameJson(scoreList[existingIdx], item)) {
+                scoreList[existingIdx] = item.copyJson()
+                changed = true
+            }
+        }
+        if (changed) {
+            out.put("scores", JSONArray().apply { scoreList.forEach { put(it) } })
+        }
+
+        // Merge mk by union.
+        val mergedMk = LinkedHashSet<String>()
+        current.arr("mk").values().filterIsInstance<String>().forEach { mergedMk.add(it) }
+        incoming.arr("mk").values().filterIsInstance<String>().forEach { mergedMk.add(it) }
+        if (mergedMk.toList() != current.arr("mk").values()) {
+            out.put("mk", JSONArray(mergedMk.toList()))
+            changed = true
+        }
+
+        // Merge ch, cf, ce, cd per subject.
+        val chapterSubjects = linkedSetOf<String>()
+        listOf("ch", "cf", "ce", "cd").forEach { field ->
+            current.optJSONObject(field)?.namesList()?.forEach { chapterSubjects.add(it) }
+            incoming.optJSONObject(field)?.namesList()?.forEach { chapterSubjects.add(it) }
+        }
+        val outCh = out.optJSONObject("ch") ?: JSONObject().also { out.put("ch", it) }
+        val outCf = out.optJSONObject("cf") ?: JSONObject().also { out.put("cf", it) }
+        val outCe = out.optJSONObject("ce") ?: JSONObject().also { out.put("ce", it) }
+        val outCd = out.optJSONObject("cd") ?: JSONObject().also { out.put("cd", it) }
+        chapterSubjects.forEach { subject ->
+            val inCurrent = listOf("ch", "cf", "ce", "cd").any { current.optJSONObject(it)?.hasValue(subject) == true }
+            val inIncoming = listOf("ch", "cf", "ce", "cd").any { incoming.optJSONObject(it)?.hasValue(subject) == true }
+            if (!inCurrent && inIncoming) {
+                incoming.optJSONObject("ch")?.optJSONArray(subject)?.let { outCh.put(subject, JSONArray(it.toString())); changed = true }
+                if (presence == null || presence.hasCf) incoming.optJSONObject("cf")?.opt(subject)?.takeIf { it !== JSONObject.NULL }?.let { outCf.put(subject, it); changed = true }
+                if (presence == null || presence.hasCe) incoming.optJSONObject("ce")?.opt(subject)?.takeIf { it !== JSONObject.NULL }?.let { outCe.put(subject, it); changed = true }
+                if (presence == null || presence.hasCd) incoming.optJSONObject("cd")?.optJSONObject(subject)?.let { outCd.put(subject, it.copyJson()); changed = true }
+            } else if (inCurrent && inIncoming && incomingNewer) {
+                val incFlags = incoming.optJSONObject("ch")?.optJSONArray(subject)
+                val curFlags = current.optJSONObject("ch")?.optJSONArray(subject)
+                if (!sameJson(curFlags, incFlags)) {
+                    if (incFlags != null) outCh.put(subject, JSONArray(incFlags.toString())) else outCh.remove(subject)
                     changed = true
+                }
+                if (presence == null || presence.hasCd) {
+                    val incDates = incoming.optJSONObject("cd")?.optJSONObject(subject)
+                    val curDates = current.optJSONObject("cd")?.optJSONObject(subject)
+                    if (!sameJson(curDates, incDates)) {
+                        if (incDates != null) outCd.put(subject, incDates.copyJson()) else outCd.remove(subject)
+                        changed = true
+                    }
+                }
+                if (presence == null || presence.hasCf) {
+                    val incFirst = incoming.optJSONObject("cf")?.opt(subject)?.takeIf { it !== JSONObject.NULL }
+                    val curFirst = current.optJSONObject("cf")?.opt(subject)?.takeIf { it !== JSONObject.NULL }
+                    if (!sameJson(curFirst, incFirst)) {
+                        if (incFirst != null) outCf.put(subject, incFirst) else outCf.remove(subject)
+                        changed = true
+                    }
+                }
+                if (presence == null || presence.hasCe) {
+                    val incEnd = incoming.optJSONObject("ce")?.opt(subject)?.takeIf { it !== JSONObject.NULL }
+                    val curEnd = current.optJSONObject("ce")?.opt(subject)?.takeIf { it !== JSONObject.NULL }
+                    if (!sameJson(curEnd, incEnd)) {
+                        if (incEnd != null) outCe.put(subject, incEnd) else outCe.remove(subject)
+                        changed = true
+                    }
                 }
             }
         }
-        if (incoming.optDouble("upd", 0.0) > current.optDouble("upd", 0.0)) {
-            listOf("recur", "scores", "ch", "cf", "ce", "mk").forEach { field ->
-                val value = incoming.opt(field)
-                val previous = current.opt(field)
-                if (value?.toString() != previous?.toString()) {
-                    out.put(field, if (value is JSONObject) value.copyJson() else JSONArray(value?.toString() ?: "[]"))
-                    changed = true
-                }
-            }
-            // Chapter dates belong to the chapter flags: both come from the newer snapshot together.
-            val incomingDates = incoming.optJSONObject("cd") ?: JSONObject()
-            val currentDates = current.optJSONObject("cd") ?: JSONObject()
-            val datesChanged = !sameJson(incomingDates, currentDates)
-            val chaptersChanged = !sameJson(incoming.optJSONObject("ch"), current.optJSONObject("ch"))
-            if (datesChanged || chaptersChanged) {
-                out.put("ch", incoming.optJSONObject("ch")?.copyJson() ?: JSONObject())
-                out.put("cd", incomingDates.copyJson())
+        if (!out.has("cd")) out.put("cd", JSONObject())
+
+        if (incomingNewer) {
+            val incRecur = incoming.opt("recur")
+            val curRecur = current.opt("recur")
+            if (incRecur?.toString() != curRecur?.toString()) {
+                out.put("recur", JSONArray(incRecur?.toString() ?: "[]"))
                 changed = true
-            } else if (!out.has("cd")) {
-                out.put("cd", JSONObject())
+            }
+            val incRecurFrom = incoming.optJSONObject("recurFrom")
+            val curRecurFrom = current.optJSONObject("recurFrom")
+            if (incRecurFrom != null && !sameJson(curRecurFrom, incRecurFrom)) {
+                out.put("recurFrom", incRecurFrom.copyJson())
+                changed = true
             }
             val settings = current.obj("settings").copyJson()
-            incoming.obj("settings").namesList().forEach { settings.put(it, incoming.obj("settings").get(it)) }
+            incoming.obj("settings").namesList().forEach { key ->
+                val skipWebDefault = (key == "wordBase" && presence != null && !presence.hasWordBase) ||
+                    (key == "wordGoal" && presence != null && !presence.hasWordGoal)
+                if (!skipWebDefault) settings.put(key, incoming.obj("settings").get(key))
+            }
             if (settings.toString() != current.obj("settings").toString()) { out.put("settings", settings); changed = true }
             if (truthy(incoming.opt("tip")) && !truthy(current.opt("tip"))) { out.put("tip", 1); changed = true }
             if (incoming.optDouble("bk", 0.0) > current.optDouble("bk", 0.0)) { out.put("bk", incoming.get("bk")); changed = true }
         }
         out.put("upd", maxOf(current.optDouble("upd", 0.0), incoming.optDouble("upd", 0.0)))
-        return if (changed) out else current.copyJson()
+        return (if (changed) out else current.copyJson()) to changed
     }
 
     fun importBackup(current: JSONObject, raw: String, mode: String = "merge", now: Long = System.currentTimeMillis(), recoveryRaw: String? = null): JSONObject {
         require(mode in listOf("merge", "replace"))
         val incoming = parseBackup(raw)
-        val merged = if (mode == "replace" || recoveryRaw != null) incoming else mergeState(current, incoming)
+        if (mode == "replace" || recoveryRaw != null) {
+            incoming.remove("_undo")
+            return normalizeState(incoming.put("upd", now).put("_recovery", recoveryRaw ?: backupJSON(current)))
+        }
+        val presence = detectPresence(raw)
+        val (merged, changed) = mergeStateTracked(current, incoming, presence)
+        if (!changed) {
+            return normalizeState(current.copyJson().apply { remove("_undo") })
+        }
         merged.remove("_undo")
-        return normalizeState(merged.put("upd", now).put("_recovery", recoveryRaw ?: backupJSON(current)))
+        return normalizeState(merged.put("upd", now).put("_recovery", backupJSON(current)))
     }
 }

@@ -11,10 +11,10 @@ android {
         applicationId = "com.xjb.kaoyancheckin"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "1.2.1"
+        versionCode = 11
+        versionName = "1.2.2"
     }
-    // CI supplies all four values; without them release uses the same local debug identity.
+    // CI supplies all four values; release builds without them stay unsigned rather than falling back to debug.
     val signingValues = listOf("SIGNING_STORE_FILE", "SIGNING_STORE_PASSWORD", "SIGNING_KEY_ALIAS", "SIGNING_KEY_PASSWORD")
         .map { providers.environmentVariable(it).orNull }
     if (signingValues.any { !it.isNullOrBlank() }) {
@@ -28,8 +28,10 @@ android {
     }
     buildTypes {
         getByName("release") {
-            isMinifyEnabled = false
-            signingConfig = signingConfigs.findByName("environment") ?: signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.findByName("environment")
         }
     }
     compileOptions {

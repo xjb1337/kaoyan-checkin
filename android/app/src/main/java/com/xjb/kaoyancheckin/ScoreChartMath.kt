@@ -9,11 +9,11 @@ internal object ScoreChartMath {
     const val PLOT_RIGHT = 14f
     const val PLOT_TOP = 26f
     const val PLOT_BOTTOM = 24f
-    const val MIN_SCORE = 100.0
+    const val MIN_SCORE = 0.0
     const val MAX_SCORE = 300.0
     const val REFERENCE_SCORE = 200.0
 
-    val axisScores = listOf(100, 150, 200, 250, 300)
+    val axisScores = listOf(0, 100, 150, 200, 250, 300)
 
     fun plotX(index: Int, count: Int, width: Float): Float {
         if (count <= 0) return 0f

@@ -48,13 +48,28 @@ class ScreenCalculationsTest {
         assertNull(formatUnstartedSubjects(emptyList()))
     }
 
-    @Test fun planExpectedProgressKeepsLinearRoundingAndEndBoundary() {
+    @Test fun planExpectedProgressFloorsCompletedIntervalsAndKeepsEndBoundary() {
         val subject = plan.subjects.first()
         val state = CheckinCore.emptyState()
+        val start = java.time.LocalDate.parse(subject.getString("s"))
+        val end = java.time.LocalDate.parse(subject.getString("e"))
+        val total = subject.arr("ch").length()
+        val spanDays = java.time.temporal.ChronoUnit.DAYS.between(start, end)
+        val halfChapterDay = start.plusDays((spanDays / (2L * total)).coerceAtLeast(1))
+        val midRow = plannedSubjects(plan, state, halfChapterDay.toString()).first()
+        assertEquals(0, midRow.expected)
+
         val rows = plannedSubjects(plan, state, subject.getString("e"))
         val row = rows.first()
-        assertEquals(subject.arr("ch").length(), row.expected)
+        assertEquals(total, row.expected)
         assertEquals(-row.total, row.difference)
+    }
+
+    @Test fun heatmapIsNotCappedAtNinetyWeeks() {
+        val state = CheckinCore.emptyState()
+        val result = statsCalculations(plan, state, "2028-08-20")
+        assertTrue(result.heatmap.size > 90)
+        assertEquals(StudyPlan.monday("2028-08-20"), result.heatmap.last().monday)
     }
 
     @Test fun statisticsExcludeFutureRecordsAndKeepWeeklyTotalsAndHeatmapConsistent() {

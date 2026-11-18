@@ -1,6 +1,7 @@
 package com.xjb.kaoyancheckin
 
 import android.app.DatePickerDialog
+import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -39,6 +40,7 @@ import com.xjb.kaoyancheckin.ui.theme.webColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.time.LocalDate
 
 // Web vSet: exam, recurring tasks, makeup cards, backup/recovery and danger controls.
@@ -50,17 +52,22 @@ internal fun SettingsScreen(model: CheckinViewModel, updates: UpdateViewModel, a
     var pasted by rememberSaveable { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
     var retireTarget by remember { mutableStateOf<String?>(null) }
-    var backupWritten by rememberSaveable { mutableStateOf(false) }
+    val prefs = remember(context) { context.getSharedPreferences("settings_ui", Context.MODE_PRIVATE) }
+    var backupWritten by remember { mutableStateOf(prefs.getBoolean("backup_written", false)) }
+    var examPickerRevision by rememberSaveable { mutableIntStateOf(0) }
     val enabled = model.loadError.isEmpty()
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        val snapshot = model.exportSnapshot
+        val snapshot = model.exportSnapshot ?: model.exportText()
         model.exportSnapshot = null
-        if (uri != null && snapshot != null) scope.launch {
+        if (uri != null) scope.launch {
             runCatching { withContext(Dispatchers.IO) {
                 val stream = context.contentResolver.openOutputStream(uri, "wt") ?: error("无法打开目标文件")
                 stream.bufferedWriter(Charsets.UTF_8).use { it.write(snapshot) }
-            } }.onSuccess { backupWritten = true; model.notify("JSON 已写入，请确认已另存到手机外") }
-                .onFailure { model.notify("导出失败：${it.message}") }
+            } }.onSuccess {
+                prefs.edit().putBoolean("backup_written", true).apply()
+                backupWritten = true
+                model.notify("JSON 已写入，请确认已另存到手机外")
+            }.onFailure { model.notify("导出失败：${it.message}") }
         }
     }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -92,18 +99,30 @@ internal fun SettingsScreen(model: CheckinViewModel, updates: UpdateViewModel, a
         }
     }
     Section("初试日期", badge = "预计", badgeColor = webColors.orange, badgeBackground = webColors.chipOrange) {
-        SaveField("初试日期", model.plan.exam(model.state), "exam", enabled, showLabel = false, placeholder = "YYYY-MM-DD",
+        fun validExamDate(date: String): Boolean = CheckinCore.validDate(date) && date >= model.plan.start && date <= "2028-08-31"
+        SaveField("初试日期", model.plan.exam(model.state), "exam-$examPickerRevision", enabled, showLabel = false, placeholder = "YYYY-MM-DD",
             trailing = {
                 Box(Modifier.size(32.dp).semantics { contentDescription = "选择初试日期" }.clickable(enabled = enabled) {
                 focus.clearFocus()
                 val value = LocalDate.parse(model.plan.exam(model.state))
-                DatePickerDialog(context, { _, year, month, day ->
+                val dialog = DatePickerDialog(context, { _, year, month, day ->
                     val date = LocalDate.of(year, month + 1, day).toString()
-                    model.edit { it.obj("settings").put("exam", date) }
-                }, value.year, value.monthValue - 1, value.dayOfMonth).show()
+                    if (!validExamDate(date)) model.notify("初试日期须在 ${model.plan.start} 至 2028-08-31 之间")
+                    else {
+                        examPickerRevision++
+                        model.edit { it.obj("settings").put("exam", date) }
+                    }
+                }, value.year, value.monthValue - 1, value.dayOfMonth)
+                dialog.datePicker.minDate = LocalDate.parse(model.plan.start).atStartOfDay(CheckinCore.shanghai).toInstant().toEpochMilli()
+                dialog.datePicker.maxDate = LocalDate.parse("2028-08-31").atStartOfDay(CheckinCore.shanghai).toInstant().toEpochMilli()
+                dialog.show()
                 }, contentAlignment = Alignment.Center) { CalendarIcon() }
             }) { date ->
-            if (!CheckinCore.validDate(date)) model.notify("初试日期格式错误") else model.edit { it.obj("settings").put("exam", date) }
+            when {
+                !CheckinCore.validDate(date) -> model.notify("初试日期格式错误")
+                !validExamDate(date) -> model.notify("初试日期须在 ${model.plan.start} 至 2028-08-31 之间")
+                else -> model.edit { it.obj("settings").put("exam", date) }
+            }
         }
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -124,15 +143,23 @@ internal fun SettingsScreen(model: CheckinViewModel, updates: UpdateViewModel, a
         SaveField("起始已背（个）", settings.optInt("wordBase", CheckinCore.DEFAULT_WORD_BASE).toString(),
             "wordBase", enabled, integer = true) { value ->
             val parsed = value.toIntOrNull()
-            if (parsed == null || parsed !in 0..20000) model.notify("单词基数须为 0–20000 的整数")
-            else model.edit { it.obj("settings").put("wordBase", parsed) }
+            val currentGoal = settings.optInt("wordGoal", CheckinCore.DEFAULT_WORD_GOAL)
+            when {
+                parsed == null || parsed !in 0..20000 -> model.notify("单词基数须为 0–20000 的整数")
+                parsed >= currentGoal -> model.notify("起始已背须小于第一轮目标（当前目标 $currentGoal 个）")
+                else -> model.edit { it.obj("settings").put("wordBase", parsed) }
+            }
         }
         Spacer(Modifier.height(8.dp))
         SaveField("第一轮目标（个）", settings.optInt("wordGoal", CheckinCore.DEFAULT_WORD_GOAL).toString(),
             "wordGoal", enabled, integer = true) { value ->
             val parsed = value.toIntOrNull()
-            if (parsed == null || parsed !in 1..50000) model.notify("单词目标须为 1–50000 的整数")
-            else model.edit { it.obj("settings").put("wordGoal", parsed) }
+            val currentBase = settings.optInt("wordBase", CheckinCore.DEFAULT_WORD_BASE)
+            when {
+                parsed == null || parsed !in 1..50000 -> model.notify("单词目标须为 1–50000 的整数")
+                parsed <= currentBase -> model.notify("第一轮目标须大于起始已背（当前起始 $currentBase 个）")
+                else -> model.edit { it.obj("settings").put("wordGoal", parsed) }
+            }
         }
     }
     Section("固定每日任务（自定义）") {
@@ -145,9 +172,7 @@ internal fun SettingsScreen(model: CheckinViewModel, updates: UpdateViewModel, a
             Divider()
         }
         AddField("如：跟导师课题推进", enabled, "加入每天") { name -> model.edit {
-            require(name.length <= 200) { "任务名请控制在 200 字以内" }
-            require(name !in it.arr("recur").values()) { "任务已存在" }
-            it.arr("recur").put(name)
+            StudyPlan.addRecurringTask(it, name, model.today)
         } }
     }
     Section("补签卡", badge = "每月 2 张") {
@@ -183,7 +208,11 @@ internal fun SettingsScreen(model: CheckinViewModel, updates: UpdateViewModel, a
         }, Modifier.fillMaxWidth(), big = true)
         if (backupWritten && enabled) {
             Spacer(Modifier.height(10.dp))
-            WebButton("已确认另存到手机外", { model.confirmBackup(); backupWritten = false }, Modifier.fillMaxWidth(), big = true)
+            WebButton("已确认另存到手机外", {
+                model.confirmBackup()
+                prefs.edit().remove("backup_written").apply()
+                backupWritten = false
+            }, Modifier.fillMaxWidth(), big = true)
         }
         Spacer(Modifier.height(14.dp))
         Text("备份提醒周期", fontSize = 11.5.sp, color = webColors.sub)
@@ -218,12 +247,20 @@ internal fun SettingsScreen(model: CheckinViewModel, updates: UpdateViewModel, a
             Tip("合并：每天、每周取较新记录；章节、成绩等按整份备份时间选择。完整恢复：整份替换。导入前保留一份本机恢复副本。")
             if (!enabled) Tip("本机存档异常，导入将使用完整恢复，并保留原始存档。")
             Spacer(Modifier.height(10.dp))
-            WebButton("合并这份备份", { confirm = "merge" }, Modifier.fillMaxWidth(), big = true, primary = true)
-            Spacer(Modifier.height(10.dp))
-            WebButton("完整恢复这份备份", { confirm = "replace" }, Modifier.fillMaxWidth(), big = true)
+            if (enabled) {
+                WebButton("合并这份备份", { confirm = "merge" }, Modifier.fillMaxWidth(), big = true, primary = true)
+                Spacer(Modifier.height(10.dp))
+            }
+            WebButton("完整恢复这份备份", { confirm = "replace" }, Modifier.fillMaxWidth(), big = true, primary = !enabled)
+        }
+        var hasRecovery by remember { mutableStateOf(false) }
+        LaunchedEffect(model.state, model.recoveryRaw) {
+            hasRecovery = model.state.optString("_recovery", "").isNotEmpty() ||
+                runCatching { JSONObject(model.recoveryRaw ?: "{}").optString("_recovery", "").isNotEmpty() }.getOrDefault(false) ||
+                withContext(Dispatchers.IO) { !CheckinRepository.get(context).readRecovery().isNullOrEmpty() }
         }
         Spacer(Modifier.height(10.dp))
-        WebButton("恢复上次导入前的副本", { confirm = "previous" }, Modifier.fillMaxWidth(), big = true)
+        WebButton("恢复上次导入前的副本", { confirm = "previous" }, Modifier.fillMaxWidth(), enabled = hasRecovery, big = true)
         Spacer(Modifier.height(18.dp))
         Text("危险操作", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = webColors.text)
         Spacer(Modifier.height(8.dp))
@@ -237,9 +274,26 @@ internal fun SettingsScreen(model: CheckinViewModel, updates: UpdateViewModel, a
     }
     if (confirm.isNotEmpty()) {
         val action = confirm
-        val title = when (action) { "merge" -> "确认合并？"; "replace" -> "完整替换当前记录？"; "previous" -> "恢复上次导入前副本？"; else -> "确定清空打卡数据？" }
-        ConfirmDialog(title, if (action == "wipe") "清空不可撤销。是否已将 JSON 备份另存到手机外？" else "当前数据会保留为新的本机恢复副本。每次只保留上一份，不是备份历史。",
-            { confirm = "" }) { when (action) { "merge", "replace" -> model.import(action); "previous" -> model.restorePrevious(); "wipe" -> model.wipe() } }
+        val title = when (action) {
+            "merge" -> "确认合并？"
+            "replace" -> "完整替换当前记录？"
+            "previous" -> "恢复上次导入前副本？"
+            "wipe_final" -> "再次确认清空？"
+            else -> "确定清空打卡数据？"
+        }
+        val body = when (action) {
+            "wipe" -> "清空不可撤销。是否已将 JSON 备份另存到手机外？"
+            "wipe_final" -> "此操作将永久清空全部打卡、章节、成绩与恢复副本，且无法撤销。"
+            else -> "当前数据会保留为新的本机恢复副本。每次只保留上一份，不是备份历史。"
+        }
+        ConfirmDialog(title, body, { if (confirm == action) confirm = "" }) {
+            when (action) {
+                "merge", "replace" -> model.import(action)
+                "previous" -> model.restorePrevious()
+                "wipe" -> confirm = "wipe_final"
+                "wipe_final" -> model.wipe()
+            }
+        }
     }
     retireTarget?.let { name ->
         ConfirmDialog(
@@ -268,7 +322,7 @@ private fun ThemePreviewCard(theme: AppTheme, selected: Boolean, onClick: () -> 
             MiniThemePreview(paletteFor(theme, true), Modifier.weight(1f))
         }
         Text(theme.label, color = c.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-        Text(if (selected) "正在使用" else "跟随系统", color = if (selected) c.accent else c.sub, fontSize = 11.sp, maxLines = 1)
+        Text(if (selected) "使用中" else "点击切换", color = if (selected) c.accent else c.sub, fontSize = 11.sp, maxLines = 1)
     }
 }
 

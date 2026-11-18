@@ -12,6 +12,7 @@ internal object ScoreEntry {
         ScoreSubject("path", "病理"),
         ScoreSubject("med", "内科"),
         ScoreSubject("surg", "外科"),
+        ScoreSubject("hum", "人文"),
     )
 
     fun normalizeParts(values: Map<String, String>, total: Double): JSONObject {

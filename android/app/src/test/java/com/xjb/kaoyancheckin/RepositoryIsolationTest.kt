@@ -10,6 +10,7 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -78,5 +79,19 @@ class RepositoryIsolationTest {
             continueWrite.countDown()
             pending.join()
         }
+    }
+
+    @Test fun documentStoreSeparatesRecoveryFromMainDocument() = runBlocking {
+        var mainDoc: String? = null
+        var recoveryDoc: String? = null
+        val store = DocumentStore(
+            readRaw = { mainDoc },
+            writeRaw = { mainDoc = it },
+            readRecovery = { recoveryDoc },
+            writeRecovery = { recoveryDoc = it },
+        )
+        store.update { it.put("_recovery", """{"days":{}}""").put("bk", 42) }
+        assertFalse(JSONObject(checkNotNull(store.read())).has("_recovery"))
+        assertEquals("""{"days":{}}""", store.readRecovery())
     }
 }

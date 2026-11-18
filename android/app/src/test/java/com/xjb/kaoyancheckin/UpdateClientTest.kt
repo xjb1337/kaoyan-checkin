@@ -17,6 +17,8 @@ class UpdateClientTest {
     private val manifest = UpdateManifest(4, "0.4.0", "https://example.com/app.apk", hash, "说明")
 
     private class FakeConnection(url: String, private val bytes: ByteArray, private val status: Int = 200, private val readError: IOException? = null) : HttpURLConnection(URL(url)) {
+        val headers = mutableMapOf<String, String>()
+        override fun setRequestProperty(key: String?, value: String?) { if (key != null && value != null) headers[key] = value }
         override fun connect() = Unit
         override fun disconnect() = Unit
         override fun usingProxy() = false
@@ -27,12 +29,14 @@ class UpdateClientTest {
 
     @Test fun releaseWithoutManifestDoesNotFetchOrOfferUpgrade() = runBlocking {
         var requests = 0
+        lateinit var lastConn: FakeConnection
         val client = UpdateClient { url ->
             requests++
-            FakeConnection(url, """{"assets":[{"name":"old.apk"}]}""".toByteArray())
+            FakeConnection(url, """{"assets":[{"name":"old.apk"}]}""".toByteArray()).also { lastConn = it }
         }
         assertEquals(UpdateCheck.NoManifest, client.check(3))
         assertEquals(1, requests)
+        assertEquals("KaoyanCheckin-Android/${BuildConfig.VERSION_NAME}", lastConn.headers["User-Agent"])
     }
 
     @Test fun downloadedApkIsVerifiedAndFailureDeletesPartialFile() = runBlocking {

@@ -4,7 +4,6 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.RectF
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.toArgb
@@ -14,20 +13,6 @@ import kotlin.math.roundToInt
 
 /** Small RemoteViews bitmaps let every palette share rounded, custom graphics on Android 8+. */
 internal object WidgetArtwork {
-    fun backdrop(width: Int, height: Int, density: Float, c: WebColors): Bitmap {
-        // Bound memory per widget even on unusually large launcher grids.
-        val scale = min(density, 1024f / maxOf(width, height, 1))
-        val w = (width.coerceAtLeast(1) * scale).roundToInt().coerceAtLeast(1)
-        val h = (height.coerceAtLeast(1) * scale).roundToInt().coerceAtLeast(1)
-        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        val bounds = RectF(0f, 0f, w.toFloat(), h.toFloat())
-        paint.color = c.card.toArgb()
-        canvas.drawRoundRect(bounds, 18 * scale, 18 * scale, paint)
-        return bitmap
-    }
-
     fun header(width: Int, density: Float, c: WebColors, status: WidgetStatus, satisfied: Boolean): Bitmap {
         val scale = min(density, 1024f / width.coerceAtLeast(1))
         val w = (width.coerceAtLeast(1) * scale).roundToInt().coerceAtLeast(1)

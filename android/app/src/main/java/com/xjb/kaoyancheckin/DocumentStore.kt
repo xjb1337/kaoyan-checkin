@@ -14,12 +14,20 @@ internal class DocumentStore(
     private val readRaw: suspend () -> String?,
     private val writeRaw: suspend (String) -> Unit,
     private val now: () -> Long = System::currentTimeMillis,
+    private val readRecovery: (suspend () -> String?)? = null,
+    private val writeRecovery: (suspend (String?) -> Unit)? = null,
 ) {
     private val mutex = Mutex()
     private val changed = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     val changes = changed.asSharedFlow()
 
     suspend fun read(): String? = mutex.withLock { readRaw() }
+
+    suspend fun readRecovery(): String? = mutex.withLock {
+        readRecovery?.invoke() ?: readRaw()?.let { raw ->
+            runCatching { JSONObject(raw).optString("_recovery", "").ifEmpty { null } }.getOrNull()
+        }
+    }
 
     suspend fun <T> inspect(block: (String?) -> T): T = mutex.withLock {
         val raw = readRaw()
@@ -29,17 +37,28 @@ internal class DocumentStore(
     suspend fun update(allowRecovery: Boolean = false, change: (JSONObject) -> JSONObject?): Boolean {
         val written = mutex.withLock {
             val raw = readRaw()
-            val json = withContext(Dispatchers.Default) {
+            val storedRecovery = if (readRecovery != null) readRecovery.invoke() else null
+            val payload = withContext(Dispatchers.Default) {
                 val current = if (raw == null) CheckinCore.emptyState() else try {
                     CheckinCore.parseBackupDocument(raw)
                 } catch (e: Exception) {
                     if (!allowRecovery) throw e
                     CheckinCore.emptyState()
                 }
+                if (readRecovery != null && !current.has("_recovery") && !storedRecovery.isNullOrEmpty()) {
+                    current.put("_recovery", storedRecovery)
+                }
                 val result = change(current.copyJson()) ?: return@withContext null
-                CheckinCore.normalizeState(result.put("upd", now())).toString()
+                val normalized = CheckinCore.normalizeState(result.put("upd", now()))
+                val nextRecovery = if (writeRecovery != null) {
+                    normalized.optString("_recovery", "").ifEmpty { null }.also { normalized.remove("_recovery") }
+                } else null
+                normalized.toString() to nextRecovery
             } ?: return@withLock false
-            writeRaw(json)
+            writeRaw(payload.first)
+            if (writeRecovery != null && payload.second != storedRecovery) {
+                writeRecovery.invoke(payload.second)
+            }
             true
         }
         // Collectors may immediately call inspect(), which needs the same non-reentrant mutex.

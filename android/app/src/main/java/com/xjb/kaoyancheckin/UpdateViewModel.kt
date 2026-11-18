@@ -22,7 +22,8 @@ internal class UpdateViewModel(app: Application) : AndroidViewModel(app) {
     private var checkJob: Job? = null
     private var downloadJob: Job? = null
     private var awaitingPermission = false
-    private var verifiedFile: File? = null
+    private var verifiedFile by mutableStateOf<File?>(null)
+    val hasVerifiedApk: Boolean get() = available != null && verifiedFile?.isFile == true
     var checking by mutableStateOf(false); private set
     var downloading by mutableStateOf(false); private set
     var downloaded by mutableStateOf(0L); private set
@@ -32,14 +33,27 @@ internal class UpdateViewModel(app: Application) : AndroidViewModel(app) {
     var dialogVisible by mutableStateOf(false); private set
     var permissionNeeded by mutableStateOf(false); private set
 
+    init {
+        cleanupInstalledApk()
+    }
+
+    private fun cleanupInstalledApk() {
+        val cachedApk = File(getApplication<Application>().cacheDir, "updates/update.apk")
+        val downloadedVersion = preferences.getInt("downloaded_version_code", 0)
+        if (cachedApk.exists() && (downloadedVersion == 0 || downloadedVersion <= BuildConfig.VERSION_CODE)) {
+            runCatching { cachedApk.delete() }
+            preferences.edit().remove("downloaded_version_code").apply()
+        }
+    }
+
     fun onResume() {
+        cleanupInstalledApk()
         if (awaitingPermission) {
             awaitingPermission = false
             if (getApplication<Application>().packageManager.canRequestPackageInstalls()) install()
             else permissionNeeded = true
         }
         if (preferences.getString("last_auto_check", null) != CheckinCore.today() && checkJob?.isActive != true) {
-            preferences.edit().putString("last_auto_check", CheckinCore.today()).apply()
             check(silent = true)
         }
     }
@@ -60,9 +74,18 @@ internal class UpdateViewModel(app: Application) : AndroidViewModel(app) {
                     UpdateCheck.Latest -> if (!silent) { available = null; verifiedFile = null; permissionNeeded = false; message = "已是最新版本。"; dialogVisible = true }
                     UpdateCheck.NoManifest -> if (!silent) { available = null; verifiedFile = null; permissionNeeded = false; message = "当前 Release 没有自动更新信息。"; dialogVisible = true }
                 }
+                preferences.edit().putString("last_auto_check", CheckinCore.today()).apply()
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
-                if (!silent) { available = null; verifiedFile = null; permissionNeeded = false; message = UpdateProtocol.message(UpdateProtocol.classify(e)); dialogVisible = true }
+                if (!silent) {
+                    if (!hasVerifiedApk) {
+                        available = null
+                        verifiedFile = null
+                    }
+                    permissionNeeded = false
+                    message = UpdateProtocol.message(UpdateProtocol.classify(e))
+                    dialogVisible = true
+                }
             } finally { checking = false }
         }
     }
@@ -78,6 +101,7 @@ internal class UpdateViewModel(app: Application) : AndroidViewModel(app) {
                     viewModelScope.launch { downloaded = bytes; total = size }
                 }
                 verifiedFile = file
+                preferences.edit().putInt("downloaded_version_code", manifest.versionCode).apply()
                 install()
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { message = UpdateProtocol.message(UpdateProtocol.classify(e)) }

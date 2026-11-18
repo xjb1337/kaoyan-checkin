@@ -50,6 +50,16 @@ internal sealed interface WordForecast {
         val activeDays: Int,
     ) : WordForecast
 
+    data class Stalled(
+        override val total: Long,
+        override val goal: Int,
+        val activeDays: Int,
+        val recentWords: Long,
+        val requiredDaily: Int?,
+        val requiredDailyForExam: Boolean,
+        val examPassed: Boolean,
+    ) : WordForecast
+
     data class Estimated(
         override val total: Long,
         override val goal: Int,
@@ -65,8 +75,9 @@ internal sealed interface WordForecast {
         /** exam - estimate; negative means the estimate is after the exam. */
         val examMarginDays: Long,
         val requiredDaily: Int?,
-        /** True when the plan target has already passed, so [requiredDaily] targets the exam. */
+        /** True when [requiredDaily] targets the exam rather than [planTarget]. */
         val requiredDailyForExam: Boolean,
+        val referenceYear: Int = windowEnd.year,
     ) : WordForecast
 }
 
@@ -80,6 +91,7 @@ internal sealed interface SubjectForecast {
         override val done: Int,
         override val total: Int,
         val planStart: LocalDate,
+        val referenceYear: Int? = null,
     ) : SubjectForecast
 
     data class Completed(
@@ -90,6 +102,7 @@ internal sealed interface SubjectForecast {
         val completedDate: LocalDate?,
         /** completedDate - planEnd; negative is early, positive is late. */
         val planDeltaDays: Long?,
+        val referenceYear: Int? = null,
     ) : SubjectForecast
 
     data class Insufficient(
@@ -99,6 +112,17 @@ internal sealed interface SubjectForecast {
         val reason: SubjectForecastGap,
         val firstDate: LocalDate?,
         val elapsedDays: Long?,
+    ) : SubjectForecast
+
+    data class Stalled(
+        override val subjectName: String,
+        override val done: Int,
+        override val total: Int,
+        val planEnd: LocalDate,
+        val remaining: Int,
+        val weeklyNeeded: Double?,
+        val planOverdue: Boolean,
+        val referenceYear: Int? = null,
     ) : SubjectForecast
 
     data class Estimated(
@@ -117,6 +141,7 @@ internal sealed interface SubjectForecast {
         val planOverdue: Boolean,
         val planEndsToday: Boolean,
         val pace: SubjectPace = SubjectPace.AVERAGE,
+        val referenceYear: Int? = null,
     ) : SubjectForecast
 }
 
@@ -150,6 +175,7 @@ internal val WordForecast.tone: ForecastTone
     get() = when (this) {
         is WordForecast.Completed -> ForecastTone.GOOD
         is WordForecast.Insufficient -> ForecastTone.NEUTRAL
+        is WordForecast.Stalled -> ForecastTone.BAD
         is WordForecast.Estimated -> if (planDeltaDays <= 0) ForecastTone.GOOD else ForecastTone.BAD
     }
 
@@ -158,6 +184,7 @@ internal val SubjectForecast.tone: ForecastTone
         is SubjectForecast.Completed -> ForecastTone.GOOD
         is SubjectForecast.NotStarted -> ForecastTone.NEUTRAL
         is SubjectForecast.Insufficient -> ForecastTone.NEUTRAL
+        is SubjectForecast.Stalled -> ForecastTone.BAD
         is SubjectForecast.Estimated -> if (planDeltaDays <= 0) ForecastTone.GOOD else ForecastTone.BAD
     }
 
@@ -211,21 +238,42 @@ internal fun forecastWords(
         }
         date = date.plusDays(1)
     }
+    val effectiveTarget = minOf(target, exam)
+    val remaining = (progress.goal.toLong() - progress.total).coerceAtLeast(1)
     if (activeDays < MIN_WORD_ACTIVE_DAYS || newWords <= 0) {
+        if (earliestPositive < defaultStart) {
+            val deadline = when {
+                effectiveTarget >= today -> effectiveTarget
+                exam >= today -> exam
+                else -> null
+            }
+            val requiredDaily = deadline?.let { d ->
+                val daysLeft = ChronoUnit.DAYS.between(today, d).coerceAtLeast(1)
+                ceil(remaining.toDouble() / daysLeft).toInt()
+            }
+            return WordForecast.Stalled(
+                total = progress.total,
+                goal = progress.goal,
+                activeDays = activeDays,
+                recentWords = newWords,
+                requiredDaily = requiredDaily,
+                requiredDailyForExam = deadline == exam && effectiveTarget < today,
+                examPassed = today > exam,
+            )
+        }
         return WordForecast.Insufficient(progress.total, progress.goal, activeDays)
     }
 
     val averagePerDay = newWords.toDouble() / calendarDays
-    val remaining = (progress.goal.toLong() - progress.total).coerceAtLeast(1)
     val daysNeeded = ceil(remaining / averagePerDay).toLong()
     val estimateBase = if (windowEnd == today) windowEnd else today
     val estimatedDate = estimateBase.plusDays(daysNeeded)
-    val planDeltaDays = ChronoUnit.DAYS.between(target, estimatedDate)
+    val planDeltaDays = ChronoUnit.DAYS.between(effectiveTarget, estimatedDate)
     val examMarginDays = ChronoUnit.DAYS.between(estimatedDate, exam)
 
     val requiredDailyDeadline = when {
-        target >= today && estimatedDate > target -> target
-        estimatedDate > exam -> exam
+        estimatedDate > exam && exam >= today -> exam
+        effectiveTarget >= today && estimatedDate > effectiveTarget -> effectiveTarget
         else -> null
     }
     val requiredDaily = requiredDailyDeadline?.let { deadline ->
@@ -241,12 +289,13 @@ internal fun forecastWords(
         activeDays = activeDays,
         averagePerDay = averagePerDay,
         estimatedDate = estimatedDate,
-        planTarget = target,
+        planTarget = effectiveTarget,
         planDeltaDays = planDeltaDays,
         exam = exam,
         examMarginDays = examMarginDays,
         requiredDaily = requiredDaily,
         requiredDailyForExam = requiredDailyDeadline == exam,
+        referenceYear = today.year,
     )
 }
 
@@ -265,11 +314,13 @@ internal fun forecastSubject(subject: JSONObject, state: JSONObject, today: Loca
     val planStart = LocalDate.parse(subject.getString("s"))
     val planEnd = LocalDate.parse(subject.getString("e"))
 
-    if (today < planStart) {
-        return SubjectForecast.NotStarted(subjectName, done, total, planStart)
+    if (today < planStart && done <= 0) {
+        return SubjectForecast.NotStarted(subjectName, done, total, planStart, today.year)
     }
+    val datedChapters = datedCheckedChapters(state, key, flags, total, today)
     if (total > 0 && done >= total) {
         val completedDate = parseDate(state.obj("ce").optString(key))
+            ?: datedChapters.maxOfOrNull { it.second }
         return SubjectForecast.Completed(
             subjectName = subjectName,
             done = done,
@@ -277,22 +328,24 @@ internal fun forecastSubject(subject: JSONObject, state: JSONObject, today: Loca
             planEnd = planEnd,
             completedDate = completedDate,
             planDeltaDays = completedDate?.let { ChronoUnit.DAYS.between(planEnd, it) },
+            referenceYear = today.year,
         )
     }
     if (done <= 0) {
         return SubjectForecast.Insufficient(subjectName, done, total, SubjectForecastGap.NO_CHAPTERS, null, null)
     }
 
-    val datedChapters = datedCheckedChapters(state, key, flags, total, today)
+    val cfDate = parseDate(state.obj("cf").optString(key))
     if (datedChapters.size >= MIN_DATED_CHAPTERS_FOR_RECENT_FORECAST) {
-        val earliest = datedChapters.minOf { it.second }
+        val earliestDated = datedChapters.minOf { it.second }
+        val earliest = if (cfDate != null) minOf(cfDate, earliestDated) else earliestDated
         val latest = datedChapters.maxOf { it.second }
         if (ChronoUnit.DAYS.between(earliest, latest) >= MIN_DATED_CHAPTER_SPAN_DAYS) {
             val windowStart = maxOf(today.minusDays(RECENT_CHAPTER_WINDOW_DAYS - 1), earliest)
             val windowDays = ChronoUnit.DAYS.between(windowStart, today) + 1
             val recentDone = datedChapters.count { !it.second.isBefore(windowStart) }
+            val remaining = total - done
             if (recentDone > 0 && windowDays > 0) {
-                val remaining = total - done
                 val daysNeeded = (remaining.toLong() * windowDays + recentDone - 1) / recentDone
                 val estimatedDate = today.plusDays(daysNeeded)
                 return SubjectForecast.Estimated(
@@ -309,13 +362,24 @@ internal fun forecastSubject(subject: JSONObject, state: JSONObject, today: Loca
                     planOverdue = today > planEnd,
                     planEndsToday = today == planEnd,
                     pace = SubjectPace.RECENT,
+                    referenceYear = today.year,
                 )
             }
+            return SubjectForecast.Stalled(
+                subjectName = subjectName,
+                done = done,
+                total = total,
+                planEnd = planEnd,
+                remaining = remaining,
+                weeklyNeeded = weeklyNeeded(remaining, today, planEnd),
+                planOverdue = today > planEnd,
+                referenceYear = today.year,
+            )
         }
     }
 
-    val firstDate = parseDate(state.obj("cf").optString(key))
-        ?: datedChapters.minOfOrNull { it.second }
+    val firstDate = cfDate
+        ?: datedChapters.takeIf { it.size == done }?.minOfOrNull { it.second }
         ?: return SubjectForecast.Insufficient(
             subjectName, done, total, SubjectForecastGap.MISSING_FIRST_DATE, null, null,
         )
@@ -348,6 +412,7 @@ internal fun forecastSubject(subject: JSONObject, state: JSONObject, today: Loca
         planOverdue = today > planEnd,
         planEndsToday = today == planEnd,
         pace = SubjectPace.AVERAGE,
+        referenceYear = today.year,
     )
 }
 
@@ -399,19 +464,34 @@ internal fun forecastHours(state: JSONObject, plan: StudyPlan, today: LocalDate)
         target += plan.goalHours(key, state, today.toString())
         date = date.plusDays(1)
     }
+    val averageActual = actual / calendarDays
+    val averageTarget = target / calendarDays
+    val achievementRate = if (averageTarget > 0) averageActual / averageTarget * 100.0 else 0.0
     if (activeDays < MIN_HOURS_ACTIVE_DAYS) {
+        val earliestPositive = days.namesList().mapNotNull { raw ->
+            val d = parseDate(raw) ?: return@mapNotNull null
+            if (d <= windowEnd && days.obj(raw).optDouble("h", 0.0) > 0.0) d else null
+        }.minOrNull()
+        if (earliestPositive != null && earliestPositive < windowStart && achievementRate < 100.0) {
+            return HoursForecast.Estimated(
+                windowStart = windowStart,
+                windowEnd = windowEnd,
+                activeDays = activeDays,
+                averageActual = averageActual,
+                averageTarget = averageTarget,
+                achievementRate = achievementRate,
+            )
+        }
         return HoursForecast.Insufficient(activeDays, windowStart, windowEnd)
     }
 
-    val averageActual = actual / calendarDays
-    val averageTarget = target / calendarDays
     return HoursForecast.Estimated(
         windowStart = windowStart,
         windowEnd = windowEnd,
         activeDays = activeDays,
         averageActual = averageActual,
         averageTarget = averageTarget,
-        achievementRate = if (averageTarget > 0) averageActual / averageTarget * 100.0 else 0.0,
+        achievementRate = achievementRate,
     )
 }
 
@@ -420,9 +500,17 @@ internal fun formatWordsForecast(forecast: WordForecast): String = when (forecas
         "单词：累计 ${forecast.total} / ${forecast.goal}"
     is WordForecast.Insufficient ->
         "单词：累计 ${forecast.total} / ${forecast.goal}"
+    is WordForecast.Stalled -> buildString {
+        append("单词：近${FORECAST_WINDOW_DAYS}天仅 ${forecast.activeDays} 天 · 距目标还剩 ${(forecast.goal.toLong() - forecast.total).coerceAtLeast(0)}")
+        if (forecast.examPassed) {
+            append(" · 初试已过未完成")
+        } else if (forecast.requiredDaily != null) {
+            append(" · 日均需 ${forecast.requiredDaily} 个")
+        }
+    }
     is WordForecast.Estimated -> buildString {
         append("单词：日均新词 ${oneDecimal(forecast.averagePerDay)} 个 · ")
-        append("预计 ${monthDay(forecast.estimatedDate)} 过完第一轮")
+        append("预计 ${monthDay(forecast.estimatedDate, forecast.referenceYear)} 过完第一轮")
         if (forecast.requiredDaily != null && !forecast.requiredDailyForExam) {
             append(" · 日均需 ${forecast.requiredDaily} 个")
         }
@@ -442,20 +530,28 @@ internal fun formatWordsForecast(forecast: WordForecast): String = when (forecas
 
 internal fun formatSubjectForecast(forecast: SubjectForecast): String = when (forecast) {
     is SubjectForecast.NotStarted ->
-        "${forecast.subjectName}：${monthDay(forecast.planStart)} 开始"
+        "${forecast.subjectName}：${monthDay(forecast.planStart, forecast.referenceYear)} 开始"
     is SubjectForecast.Completed -> when {
         forecast.planDeltaDays == null ->
             "${forecast.subjectName}：已完成"
         forecast.completedDate == null ->
             "${forecast.subjectName}：已完成"
-        else -> "${forecast.subjectName}：已完成 · ${monthDay(forecast.completedDate)}"
+        else -> "${forecast.subjectName}：已完成 · ${monthDay(forecast.completedDate, forecast.referenceYear)}"
     }
     is SubjectForecast.Insufficient ->
         "${forecast.subjectName}：${forecast.done}/${forecast.total} 章"
+    is SubjectForecast.Stalled -> buildString {
+        append("${forecast.subjectName}：近${RECENT_CHAPTER_WINDOW_DAYS}天无新增 · 剩余 ${forecast.remaining} 章")
+        if (forecast.planOverdue) {
+            append(" · 计划已于 ${monthDay(forecast.planEnd, forecast.referenceYear)} 截止")
+        } else if (forecast.weeklyNeeded != null) {
+            append(" · 每周需 ${oneDecimal(forecast.weeklyNeeded)} 章")
+        }
+    }
     is SubjectForecast.Estimated -> buildString {
-        append("${forecast.subjectName}：预计 ${monthDay(forecast.estimatedDate)} 学完")
+        append("${forecast.subjectName}：预计 ${monthDay(forecast.estimatedDate, forecast.referenceYear)} 学完")
         when {
-            forecast.planOverdue -> append(" · 计划已于 ${monthDay(forecast.planEnd)} 截止")
+            forecast.planOverdue -> append(" · 计划已于 ${monthDay(forecast.planEnd, forecast.referenceYear)} 截止")
             forecast.planEndsToday -> append(" · 剩余 ${forecast.remaining} 章")
             forecast.weeklyNeeded != null ->
                 append(" · 每周需 ${oneDecimal(forecast.weeklyNeeded)} 章")
@@ -466,7 +562,7 @@ internal fun formatSubjectForecast(forecast: SubjectForecast): String = when (fo
 internal fun formatUpcomingSubjects(forecasts: List<SubjectForecast>): String? {
     val upcoming = forecasts.filterIsInstance<SubjectForecast.NotStarted>()
     if (upcoming.isEmpty()) return null
-    return "后续：" + upcoming.joinToString("、") { "${it.subjectName} ${monthDay(it.planStart)}" } + "开始"
+    return "后续：" + upcoming.joinToString("、") { "${it.subjectName} ${monthDay(it.planStart, it.referenceYear)}" } + "开始"
 }
 
 internal fun formatHoursForecast(forecast: HoursForecast): String = when (forecast) {
@@ -492,25 +588,45 @@ internal fun forecastSummaryItems(plan: StudyPlan, state: JSONObject, today: Loc
     val currentSubjects = plan.subjects.filter { subject ->
         val start = parseDate(subject.optString("s")) ?: return@filter false
         val end = parseDate(subject.optString("e")) ?: return@filter false
-        !today.isBefore(start) && !today.isAfter(end) &&
+        val total = subject.arr("ch").length()
+        val done = plan.chapterDone(subject, state)
+        val inWindow = !today.isBefore(start) && !today.isAfter(end) &&
             (phaseStart == null || phaseEnd == null || (start <= phaseEnd && end >= phaseStart))
+        val startedEarly = today.isBefore(start) && done > 0
+        val overdueUnfinished = today.isAfter(end) && done < total
+        inWindow || startedEarly || overdueUnfinished
     }
 
     val items = mutableListOf<ForecastSummaryItem>()
     currentSubjects.forEach { subject ->
+        val end = parseDate(subject.optString("e"))
         when (val forecast = forecastSubject(subject, state, today)) {
             is SubjectForecast.Estimated ->
                 items.add(ForecastSummaryItem(
-                    text = "${forecast.subjectName} · 预计 ${monthDay(forecast.estimatedDate)} 学完",
+                    text = "${forecast.subjectName} · 预计 ${monthDay(forecast.estimatedDate, today.year)} 学完",
                     status = earlyOrLate(forecast.planDeltaDays),
                     tone = forecast.tone,
                     method = if (forecast.pace == SubjectPace.RECENT) "近${RECENT_CHAPTER_WINDOW_DAYS}天" else "平均",
+                ))
+            is SubjectForecast.Stalled ->
+                items.add(ForecastSummaryItem(
+                    text = "${forecast.subjectName} · 近${RECENT_CHAPTER_WINDOW_DAYS}天无新增",
+                    status = "已停滞",
+                    tone = ForecastTone.BAD,
+                    method = "近${RECENT_CHAPTER_WINDOW_DAYS}天",
                 ))
             is SubjectForecast.Completed -> items.add(ForecastSummaryItem(
                 text = forecast.subjectName,
                 status = "已完成",
                 tone = ForecastTone.GOOD,
             ))
+            is SubjectForecast.Insufficient -> if (end != null && today.isAfter(end) && forecast.done < forecast.total) {
+                items.add(ForecastSummaryItem(
+                    text = "${forecast.subjectName} · ${forecast.done}/${forecast.total} 章",
+                    status = "已逾期",
+                    tone = ForecastTone.BAD,
+                ))
+            }
             else -> Unit
         }
     }
@@ -526,13 +642,19 @@ internal fun forecastSummaryItems(plan: StudyPlan, state: JSONObject, today: Loc
                 )
             } else {
                 ForecastSummaryItem(
-                    text = "单词 · 预计 ${monthDay(forecast.estimatedDate)} 过完第一轮",
+                    text = "单词 · 预计 ${monthDay(forecast.estimatedDate, today.year)} 过完第一轮",
                     status = earlyOrLate(forecast.planDeltaDays),
                     tone = forecast.tone,
                     method = "近${FORECAST_WINDOW_DAYS}天",
                 )
             })
         }
+        is WordForecast.Stalled -> items.add(ForecastSummaryItem(
+            text = if (forecast.examPassed) "单词 · 初试已过未完成" else "单词 · 近${FORECAST_WINDOW_DAYS}天仅 ${forecast.activeDays} 天",
+            status = forecast.requiredDaily?.let { "日均需 $it 个" } ?: "进度停滞",
+            tone = ForecastTone.BAD,
+            method = "近${FORECAST_WINDOW_DAYS}天",
+        ))
         is WordForecast.Completed -> items.add(ForecastSummaryItem("单词第一轮", "已完成", ForecastTone.GOOD))
         is WordForecast.Insufficient -> Unit
     }
@@ -554,7 +676,9 @@ private fun parseDate(value: String): LocalDate? {
     return runCatching { LocalDate.parse(value) }.getOrNull()?.takeIf { it.toString() == value }
 }
 
-private fun monthDay(date: LocalDate): String = "${date.monthValue}月${date.dayOfMonth}日"
+private fun monthDay(date: LocalDate, referenceYear: Int? = null): String =
+    if (referenceYear == null || date.year == referenceYear) "${date.monthValue}月${date.dayOfMonth}日"
+    else "${date.year}年${date.monthValue}月${date.dayOfMonth}日"
 
 private fun earlyOrLate(deltaDays: Long): String = when {
     deltaDays < 0 -> "提前 ${-deltaDays} 天"

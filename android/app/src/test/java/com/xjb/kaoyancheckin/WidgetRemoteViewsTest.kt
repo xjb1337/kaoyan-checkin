@@ -51,6 +51,42 @@ class WidgetRemoteViewsTest {
             dark.getChildAt(0).findViewById<TextView>(R.id.widget_title).currentTextColor)
     }
 
+    @Test @Config(qualifiers = "w412dp-h915dp-xhdpi")
+    fun overflowIndicatorShowsHiddenCountAndOddLastItemDoesNotStretchInTwoColumns() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val fiveTasks = (1..5).map { WidgetTask("t$it", "任务 $it", false) }
+        val many = snapshot.copy(tasks = fiveTasks, totalDone = 0, totalTasks = 5)
+
+        // 300x130 -> 1 col, 2 rows -> 2 visible, 3 hidden
+        val narrowRoot = CheckinWidget.views(activity, 1, many, 300, 130).apply(activity, null)
+        val narrowLight = narrowRoot.findViewById<FrameLayout>(R.id.widget_light).getChildAt(0)
+        val overflow = narrowLight.findViewById<TextView>(R.id.widget_overflow)
+        assertEquals(View.VISIBLE, overflow.visibility)
+        assertEquals("还有 3 项 ›", overflow.text.toString())
+
+        // 340x180 -> 2 cols, 3 rows -> all 5 tasks fit, last row has task + spacer (2 children)
+        val wideRoot = CheckinWidget.views(activity, 1, many, 340, 180).apply(activity, null)
+        val wideLight = wideRoot.findViewById<FrameLayout>(R.id.widget_light).getChildAt(0)
+        assertEquals(View.GONE, wideLight.findViewById<TextView>(R.id.widget_overflow).visibility)
+        val tasksContainer = wideLight.findViewById<LinearLayout>(R.id.widget_tasks)
+        assertEquals(3, tasksContainer.childCount)
+        assertEquals(2, (tasksContainer.getChildAt(2) as LinearLayout).childCount)
+    }
+
+    @Test @Config(qualifiers = "w412dp-h915dp-xhdpi")
+    fun widgetNoticeDisplaysSpecificMessageAndClears() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        WidgetNotice.post(activity, "日期已变化，请重新操作")
+        val withNotice = CheckinWidget.views(activity, 1, snapshot, 300, 130).apply(activity, null)
+            .findViewById<FrameLayout>(R.id.widget_light).getChildAt(0)
+        assertEquals("日期已变化，请重新操作", withNotice.findViewById<TextView>(R.id.widget_summary).text.toString())
+
+        WidgetNotice.clear(activity)
+        val cleared = CheckinWidget.views(activity, 1, snapshot, 300, 130).apply(activity, null)
+            .findViewById<FrameLayout>(R.id.widget_light).getChildAt(0)
+        assertEquals("最低线 1/2 · 未达标", cleared.findViewById<TextView>(R.id.widget_summary).text.toString())
+    }
+
     private fun verify(dark: Boolean) {
         val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
         ThemeRepository(activity).save(AppTheme.INK_TEAL)

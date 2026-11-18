@@ -3,10 +3,10 @@ package com.xjb.kaoyancheckin
 /** Size and status decisions are independent of RemoteViews and can be tested on the JVM. */
 internal data class WidgetLayout(val compact: Boolean, val showTitle: Boolean, val columns: Int, val maxRows: Int)
 
-internal fun widgetLayout(width: Int, height: Int, required: Int): WidgetLayout {
+internal fun widgetLayout(width: Int, height: Int, @Suppress("UNUSED_PARAMETER") required: Int): WidgetLayout {
     val compact = width < 200 || height < 90
-    val columns = if (required == 1 && width >= 320) 2 else 1
-    val rows = if (height < 110) 1 else ((height - 34) / 48).coerceIn(2, 4)
+    val columns = if (width >= 320) 2 else 1
+    val rows = if (height < 110) 1 else ((height - 34) / 48).coerceAtLeast(2)
     return WidgetLayout(compact, width >= 200, columns, rows)
 }
 

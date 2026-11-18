@@ -190,4 +190,42 @@ class MergeImportTest {
         assertEquals("2026-11-03", out.obj("cd").obj("phys").getString("0"))
         assertEquals("2026-11-09", out.obj("cd").obj("phys").getString("1"))
     }
+
+    @Test fun mergingWebBackupPreservesAndroidFieldsAndUnchangedImportKeepsRecovery() {
+        val current = state(100, "2026-11-02", 1.5).apply {
+            obj("days").obj("2026-11-02").put("w", JSONObject().put("n", 40).put("r", 80))
+            obj("ch").put("phys", JSONArray().put(true))
+            obj("cf").put("phys", "2026-11-01")
+            obj("ce").put("phys", "2026-11-02")
+            obj("cd").put("phys", JSONObject().put("0", "2026-11-01"))
+            obj("settings").put("wordBase", 1500).put("wordGoal", 6000)
+            put("_recovery", "original-recovery")
+        }
+        val webIncoming = JSONObject()
+            .put("days", JSONObject().put("2026-11-02", JSONObject().put("t", JSONObject().put("words", true)).put("c", JSONArray()).put("h", 2.0).put("sh", JSONObject().put("英语", 2.0)).put("rw", JSONObject().put("g", "web")).put("u", 200)))
+            .put("weeks", JSONObject())
+            .put("recur", JSONArray())
+            .put("scores", JSONArray().put(JSONObject("""{"id":"s-web","d":"2026-11-02","tot":210,"p":{}}""")))
+            .put("ch", JSONObject().put("biochem", JSONArray().put(true)))
+            .put("mk", JSONArray().put("2026-11-01"))
+            .put("settings", JSONObject().put("exam", "2028-01-01").put("backupDays", 14))
+            .put("upd", 200)
+
+        val merged = CheckinCore.importBackup(current, webIncoming.toString(), "merge", now = 300)
+        assertEquals(40, merged.obj("days").obj("2026-11-02").obj("w").getInt("n"))
+        assertEquals(80, merged.obj("days").obj("2026-11-02").obj("w").getInt("r"))
+        assertEquals("2026-11-01", merged.obj("cf").getString("phys"))
+        assertEquals("2026-11-02", merged.obj("ce").getString("phys"))
+        assertEquals("2026-11-01", merged.obj("cd").obj("phys").getString("0"))
+        assertTrue(merged.obj("ch").arr("biochem").getBoolean(0))
+        assertEquals(1500, merged.obj("settings").getInt("wordBase"))
+        assertEquals(6000, merged.obj("settings").getInt("wordGoal"))
+        assertEquals("s-web", merged.arr("scores").getJSONObject(0).getString("id"))
+        assertEquals("2026-11-01", merged.arr("mk").getString(0))
+
+        // Unchanged merge does not overwrite _recovery
+        val unchanged = CheckinCore.importBackup(current, CheckinCore.backupJSON(current), "merge", now = 400)
+        assertEquals("original-recovery", unchanged.getString("_recovery"))
+        assertEquals(100, unchanged.getInt("upd"))
+    }
 }

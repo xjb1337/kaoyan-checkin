@@ -1,6 +1,7 @@
 package com.xjb.kaoyancheckin
 
 import android.app.Application
+import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -53,17 +54,22 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
     })
     private val messages = Channel<String>(Channel.BUFFERED)
     val events = messages.receiveAsFlow()
-    val plan = StudyPlan(JSONObject(application.assets.open("plan.json").bufferedReader().use { it.readText() }))
+    private val undoPrefs = application.getSharedPreferences("undo_prefs", Context.MODE_PRIVATE)
+    val plan: StudyPlan by lazy {
+        StudyPlan(JSONObject(application.assets.open("plan.json").bufferedReader().use { it.readText() }))
+    }
     var state by mutableStateOf(CheckinCore.emptyState())
         private set
     var ready by mutableStateOf(false)
         private set
     internal var pendingUndo by mutableStateOf<UndoStep?>(null)
         private set
-    private var dismissedUndo: String? = null
+    private var dismissedUndo: String? = undoPrefs.getString("dismissed_token", null)
+    private var skipNextResumeRefresh = true
     var loadError by mutableStateOf("")
         private set
-    private var recoveryRaw: String? = null
+    internal var recoveryRaw: String? = null
+        private set
     var preview by mutableStateOf<JSONObject?>(null)
         private set
     private var pendingRaw: String? = null
@@ -92,6 +98,7 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private suspend fun reload() {
+        withContext(Dispatchers.IO) { plan }
         var rawOnFailure: String? = null
         try {
             state = repository.inspect { raw ->
@@ -104,7 +111,7 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            recoveryRaw = rawOnFailure
+            recoveryRaw = rawOnFailure ?: recoveryRaw
             val error = "原始存档无法读取或格式异常。已停止覆盖，请先导出原始存档，再从备份恢复。"
             if (loadError != error) notify(error)
             loadError = error
@@ -114,7 +121,12 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
 
     fun notify(message: String) { messages.trySend(message) }
 
-    fun resume() = applyToday(CheckinCore.today())
+    fun resume(): Boolean {
+        val current = CheckinCore.today()
+        if (current == today) return false
+        applyToday(current)
+        return true
+    }
 
     /** Single date source for every write; crossing midnight rolls the visible day first. */
     fun currentDay(): String {
@@ -129,7 +141,13 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
         selected = rolled.selected
         week = rolled.week
     }
-    fun refresh() { viewModelScope.launch { reload() } }
+    fun refresh() {
+        if (skipNextResumeRefresh) {
+            skipNextResumeRefresh = false
+            return
+        }
+        viewModelScope.launch { reload() }
+    }
 
     private fun change(success: String? = null, allowRecovery: Boolean = false, noChange: String? = null,
                        block: (JSONObject) -> JSONObject?) {
@@ -144,7 +162,6 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
             val changed = repository.update(allowRecovery, block)
             if (changed) {
                 if (allowRecovery) { recoveryRaw = null; loadError = ""; pendingRaw = null; preview = null }
-                reload()
                 runCatching { CheckinWidget.refreshAll(getApplication()) }
                 success?.let(::notify)
             } else noChange?.let(::notify)
@@ -187,6 +204,7 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
 
     internal fun dismissUndo(token: String) {
         dismissedUndo = token
+        undoPrefs.edit().putString("dismissed_token", token).apply()
         if (pendingUndo?.token == token) pendingUndo = null
     }
     internal fun undoTask(step: UndoStep) {
@@ -224,11 +242,36 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
         (0..2).forEach { flushDraft(DraftField.WeekGoal(target, it)) }
         change(success = "已复制上周目标", noChange = "上周没有目标") {
             require(target <= StudyPlan.monday(current)) { "未来周目标只读" }
-            if (plan.copyPreviousWeekGoals(it, target)) it else null
+            val previous = it.obj("weeks").optJSONObject(StudyPlan.addDays(target, -7))
+            val hasPrevGoals = (0..2).any { idx -> previous?.arr("must")?.optString(idx)?.isNotBlank() == true }
+            if (hasPrevGoals && plan.copyPreviousWeekGoals(it, target)) it else null
         }
     }
 
-    fun deleteCustomTask(date: String = selected, id: String) = editDay(date) { plan.deleteCustomTask(it, id) }
+    fun deleteCustomTask(date: String = selected, id: String) {
+        val previousToday = today
+        val selectedWasToday = selected == previousToday
+        val current = currentDay()
+        val target = resolveWriteDate(date, previousToday, current, selected, selectedWasToday)
+        val now = System.currentTimeMillis()
+        change { state ->
+            editDayRecord(state, target, current, now) { plan.deleteCustomTask(it, id) }
+            val undo = state.optJSONObject("_undo")
+            if (undo != null && undo.optString("task") == id && undo.optString("date") == target) {
+                state.remove("_undo")
+            }
+            state
+        }
+    }
+
+    fun adjustWords(date: String, field: String, delta: Int) {
+        flushDraft(DraftField.Words(date, field))
+        editDay(date) { day ->
+            val w = day.obj("w")
+            w.put(field, (w.optInt(field, 0) + delta).coerceIn(0, 2000))
+            day.put("w", w)
+        }
+    }
 
     fun setHours(date: String, subject: String, hours: Double) = editDay(date) { record ->
         val updated = CheckinCore.setHours(record, subject, hours)
@@ -261,11 +304,18 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun restorePrevious() {
-        val raw = state.optString("_recovery", "").ifEmpty {
-            runCatching { JSONObject(recoveryRaw ?: "{}").optString("_recovery", "") }.getOrDefault("")
+        viewModelScope.launch {
+            val raw = runCatching { repository.readRecovery() }.getOrNull().orEmpty()
+                .ifEmpty { state.optString("_recovery", "") }
+                .ifEmpty { runCatching { JSONObject(recoveryRaw ?: "{}").optString("_recovery", "") }.getOrDefault("") }
+            if (raw.isEmpty()) {
+                notify("还没有导入前副本")
+                return@launch
+            }
+            commitChange("已恢复上次导入前的记录", true) {
+                CheckinCore.importBackup(it, raw, "replace", recoveryRaw = recoveryRaw)
+            }
         }
-        if (raw.isEmpty()) { notify("还没有导入前副本"); return }
-        change("已恢复上次导入前的记录", true) { CheckinCore.importBackup(it, raw, "replace", recoveryRaw = recoveryRaw) }
     }
 
     fun exportText(): String = recoveryRaw ?: CheckinCore.backupJSON(state)
@@ -289,7 +339,7 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun retireTask(name: String) = edit { current ->
-        current.put("recur", JSONArray(current.arr("recur").values().filter { it != name }))
+        StudyPlan.retireRecurringTask(current, name)
     }
 
     fun wipe() = change("已清空打卡数据，保留设置与固定任务") {

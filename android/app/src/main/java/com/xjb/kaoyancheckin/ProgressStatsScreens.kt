@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -30,6 +32,9 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -37,6 +42,7 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -79,15 +85,26 @@ internal fun ProgressScreen(model: CheckinViewModel) {
         )
         subjectForecasts.filterNot { it is SubjectForecast.NotStarted }.forEach { forecast ->
             val missingFirst = forecast is SubjectForecast.Insufficient && forecast.reason == SubjectForecastGap.MISSING_FIRST_DATE
-            val subject = if (missingFirst) model.plan.subjects.firstOrNull { it.getString("name") == forecast.subjectName } else null
+            val missingCompleted = forecast is SubjectForecast.Completed && forecast.completedDate == null
+            val subject = if (missingFirst || missingCompleted) {
+                model.plan.subjects.firstOrNull { it.getString("name") == forecast.subjectName }
+            } else null
             ForecastRow(
                 formatSubjectForecast(forecast), subjectForecastTone(forecast), subjectForecastStatus(forecast),
                 method = subjectForecastMethod(forecast), gates = subjectForecastGates(forecast),
-                onClick = if (enabled && subject != null) ({
-                    showFirstDatePicker(context, subject.getString("s"), model.today) { picked ->
-                        model.setChapterFirstDate(subject, picked)
-                    }
-                }) else null,
+                onClick = when {
+                    enabled && missingFirst && subject != null -> ({
+                        showDatePicker(context, subject.getString("s"), model.today) { picked ->
+                            model.setChapterFirstDate(subject, picked)
+                        }
+                    })
+                    enabled && missingCompleted && subject != null -> ({
+                        showDatePicker(context, subject.getString("e"), model.today) { picked ->
+                            model.edit { setChapterCompletedDate(it, subject.getString("k"), picked) }
+                        }
+                    })
+                    else -> null
+                },
             )
         }
         formatUpcomingSubjects(subjectForecasts)?.let { text ->
@@ -118,7 +135,7 @@ internal fun ProgressScreen(model: CheckinViewModel) {
                 else -> Triple("正常", c.green, c.chipGreen)
             }
             val barColor = if (diff < 0) c.red else c.green
-            BarRow(
+            ProgressBarRow(
                 subject.getString("name"), "$done/$total", if (total == 0) 0f else done.toFloat() / total, barColor,
                 target = if (total == 0) null else expected.toFloat() / total,
             )
@@ -141,33 +158,53 @@ internal fun ProgressScreen(model: CheckinViewModel) {
             val flags = model.state.obj("ch").arr(subjectKey)
             val done = progress.done
             val expanded = expandedSubjectKey == subjectKey
-            Row(Modifier.fillMaxWidth().heightIn(min = 58.dp).clickable {
-                expandedSubjectKey = if (expanded) null else subjectKey
-            }.padding(horizontal = 2.dp, vertical = 11.dp),
+            Row(Modifier.fillMaxWidth().heightIn(min = 58.dp)
+                .semantics { stateDescription = if (expanded) "已展开" else "已折叠" }
+                .clickable { expandedSubjectKey = if (expanded) null else subjectKey }
+                .padding(horizontal = 2.dp, vertical = 11.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(if (expanded) "▾" else "▸", fontSize = 12.sp, color = c.sub)
                 Text(subject.getString("name"), Modifier.weight(1f), fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = c.text)
                 Text("$done/${chapters.length()} 章", fontSize = 11.5.sp, color = c.sub, fontWeight = FontWeight.SemiBold, maxLines = 1)
                 Chip("${subject.getString("s").substring(5)}~${subject.getString("e").substring(5)}", c.accent, c.chipBlue)
             }
+            val cfDate = model.state.obj("cf").optString(subjectKey).takeIf(CheckinCore::validDate)
             Row(Modifier.fillMaxWidth().padding(start = 2.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(progress.estimate.text, Modifier.weight(1f), color = c.sub, fontSize = 12.sp, lineHeight = 18.sp)
+                if (cfDate != null && done in 1 until chapters.length() && enabled) {
+                    Box(Modifier.clip(RoundedCornerShape(6.dp)).clickable {
+                        showDatePicker(context, cfDate, model.today) { picked ->
+                            model.setChapterFirstDate(subject, picked)
+                        }
+                    }) {
+                        Chip("首次 ${cfDate.substring(5)}", c.sub, c.bg)
+                    }
+                }
                 progress.estimate.status?.let { status ->
-                    if (status == "缺首次日期" && enabled) {
-                        Box(Modifier.clip(RoundedCornerShape(6.dp)).clickable {
-                            showFirstDatePicker(context, subject.getString("s"), model.today) { picked ->
+                    when {
+                        status == "缺首次日期" && enabled -> Box(Modifier.clip(RoundedCornerShape(6.dp)).clickable {
+                            showDatePicker(context, subject.getString("s"), model.today) { picked ->
                                 model.setChapterFirstDate(subject, picked)
                             }
                         }) {
                             Chip("补录首次日期", c.accent, c.chipBlue)
                         }
-                    } else {
-                        val (fg, bg) = when (progress.estimate.tone) {
-                            ChapterEstimateTone.GOOD -> c.green to c.chipGreen
-                            ChapterEstimateTone.BAD -> c.red to c.chipRed
-                            ChapterEstimateTone.NEUTRAL -> c.sub to c.bg
+                        status == "缺完成日期" && enabled -> Box(Modifier.clip(RoundedCornerShape(6.dp)).clickable {
+                            showDatePicker(context, subject.getString("e"), model.today) { picked ->
+                                model.edit { setChapterCompletedDate(it, subjectKey, picked) }
+                            }
+                        }) {
+                            Chip("补录完成日期", c.accent, c.chipBlue)
                         }
-                        Chip(status, fg, bg)
+                        else -> {
+                            val (fg, bg) = when (progress.estimate.tone) {
+                                ChapterEstimateTone.GOOD -> c.green to c.chipGreen
+                                ChapterEstimateTone.BAD -> c.red to c.chipRed
+                                ChapterEstimateTone.NEUTRAL -> c.sub to c.bg
+                            }
+                            Chip(status, fg, bg)
+                        }
                     }
                 }
             }
@@ -176,9 +213,12 @@ internal fun ProgressScreen(model: CheckinViewModel) {
             }
             if (expanded) chapters.values().forEachIndexed { index, chapter ->
                 val checked = flags.optBoolean(index)
-                Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable(enabled = enabled) {
-                    model.toggleChapter(subject, index)
-                }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).toggleable(
+                    value = checked,
+                    enabled = enabled,
+                    role = Role.Checkbox,
+                    onValueChange = { model.toggleChapter(subject, index) },
+                ).padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                     Text("${index + 1}", Modifier.size(22.dp).clip(RoundedCornerShape(7.dp)).background(if (checked) c.blue else c.line).wrapContentSize(),
                         textAlign = TextAlign.Center, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (checked) Color.White else c.sub)
                     Text(chapter as String, Modifier.weight(1f), fontSize = 13.5.sp, color = if (checked) c.sub else c.text)
@@ -191,7 +231,7 @@ internal fun ProgressScreen(model: CheckinViewModel) {
     }
     Section("模考 / 真题套卷成绩") {
         val scores = calculations.scores
-        var date by rememberSaveable { mutableStateOf(model.today) }
+        var date by rememberSaveable(model.today) { mutableStateOf(model.today) }
         var name by rememberSaveable { mutableStateOf("") }
         var total by rememberSaveable { mutableStateOf("") }
         var phys by rememberSaveable { mutableStateOf("") }
@@ -199,25 +239,24 @@ internal fun ProgressScreen(model: CheckinViewModel) {
         var path by rememberSaveable { mutableStateOf("") }
         var med by rememberSaveable { mutableStateOf("") }
         var surg by rememberSaveable { mutableStateOf("") }
+        var hum by rememberSaveable { mutableStateOf("") }
         val typedTotal = total.toDoubleOrNull()
-        val partsTotal = listOf(phys, bioc, path, med, surg).sumOf { it.toDoubleOrNull() ?: 0.0 }
+        val partsTotal = listOf(phys, bioc, path, med, surg, hum).sumOf { it.toDoubleOrNull() ?: 0.0 }
         val partsOver = typedTotal != null && partsTotal > typedTotal
         if (scores.isEmpty()) {
             ScoreChart(emptyList())
             WebButton("记录一次模考", { scope.launch { scoreRequester.bringIntoView() } }, Modifier.fillMaxWidth())
         }
         else {
-            var selectedScoreIndex by rememberSaveable(scores.size) { mutableStateOf<Int?>(null) }
+            var selectedScoreIndex by rememberSaveable(scores.map { it.optString("id") }) { mutableStateOf<Int?>(null) }
             ScoreChart(scores, selectedIndex = selectedScoreIndex, onSelect = { selectedScoreIndex = it })
             val shown = selectedScoreIndex?.let { scores.getOrNull(it) } ?: scores.last()
             val prefix = if (selectedScoreIndex != null) "已选" else "最近一次"
-            Tip("$prefix：${shown.optString("n").ifEmpty { "套卷" }} ${shown.getString("d")} · ${shown.getDouble("tot")} 分")
-            val selectedParts = ScoreEntry.describe(shown.obj("p"))
-            if (selectedScoreIndex != null && selectedParts.isNotEmpty()) Tip(selectedParts)
+            Tip("$prefix：${shown.optString("n").ifEmpty { "套卷" }} ${shown.getString("d")} · ${scoreAmount(shown.getDouble("tot"))} 分")
             scores.reversed().forEach { score ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("${score.getString("d")} ${score.optString("n")}", Modifier.weight(1f), fontSize = 13.sp, color = c.text)
-                    Text("${score.getDouble("tot")}", color = if (score.getDouble("tot") >= 200) c.green else c.red, fontWeight = FontWeight.Bold)
+                    Text(scoreAmount(score.getDouble("tot")), color = if (score.getDouble("tot") >= 200) c.green else c.red, fontWeight = FontWeight.Bold)
                     WebButton("删除", { deleteScoreId = score.getString("id") }, enabled = enabled)
                 }
                 val partText = ScoreEntry.describe(score.obj("p"))
@@ -230,7 +269,17 @@ internal fun ProgressScreen(model: CheckinViewModel) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.weight(1f)) {
                     Text("日期", color = c.sub, fontSize = 11.5.sp)
-                    WebInput(date, { date = it }, "考试日期 YYYY-MM-DD", Modifier.fillMaxWidth(), enabled)
+                    Box(
+                        Modifier.fillMaxWidth().heightIn(min = 42.dp).clip(RoundedCornerShape(10.dp))
+                            .background(c.bg).border(1.dp, c.line, RoundedCornerShape(10.dp))
+                            .clickable(enabled = enabled, role = Role.Button) {
+                                showDatePicker(context, date, model.today) { date = it }
+                            }
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        Text(date, color = if (enabled) c.text else c.sub, fontSize = 13.5.sp, maxLines = 1)
+                    }
                 }
                 Column(Modifier.weight(1f)) {
                     Text("卷子", color = c.sub, fontSize = 11.5.sp)
@@ -262,7 +311,7 @@ internal fun ProgressScreen(model: CheckinViewModel) {
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ScorePartField("外科", surg, { surg = it }, enabled, Modifier.weight(1f))
-                Spacer(Modifier.weight(1f))
+                ScorePartField("人文", hum, { hum = it }, enabled, Modifier.weight(1f))
             }
             Spacer(Modifier.height(10.dp))
             WebButton("保存这次成绩", {
@@ -273,7 +322,7 @@ internal fun ProgressScreen(model: CheckinViewModel) {
                 else {
                     val parts = try {
                         ScoreEntry.normalizeParts(mapOf(
-                            "phys" to phys, "bioc" to bioc, "path" to path, "med" to med, "surg" to surg,
+                            "phys" to phys, "bioc" to bioc, "path" to path, "med" to med, "surg" to surg, "hum" to hum,
                         ), score)
                     } catch (e: IllegalArgumentException) {
                         model.notify(e.message ?: "分科得分格式错误")
@@ -281,12 +330,14 @@ internal fun ProgressScreen(model: CheckinViewModel) {
                     }
                     if (parts != null) {
                         model.edit { it.arr("scores").put(JSONObject().put("id", UUID.randomUUID().toString()).put("d", date).put("n", name).put("tot", score).put("p", parts)) }
+                        name = ""
                         total = ""
                         phys = ""
                         bioc = ""
                         path = ""
                         med = ""
                         surg = ""
+                        hum = ""
                     }
                 }
             }, Modifier.fillMaxWidth(), enabled && !partsOver, big = true, primary = true)
@@ -335,14 +386,16 @@ private fun ForecastRow(
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(text, color = c.text, fontSize = 13.sp, lineHeight = 19.sp)
-            val actionGate = if (onClick != null) gates.firstOrNull { it == "缺首次日期" } else null
+            val actionGate = if (onClick != null) gates.firstOrNull { it == "缺首次日期" || it == "缺完成日期" } else null
             val metaParts = listOfNotNull(method) + gates.filter { it != actionGate }
             if (metaParts.isNotEmpty() || actionGate != null) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (metaParts.isNotEmpty()) {
                         Text(metaParts.joinToString(" · "), color = c.sub, fontSize = 11.5.sp)
                     }
-                    if (actionGate != null) Chip("补录首次日期", c.accent, c.chipBlue)
+                    if (actionGate != null) {
+                        Chip(if (actionGate == "缺完成日期") "补录完成日期" else "补录首次日期", c.accent, c.chipBlue)
+                    }
                 }
             }
         }
@@ -350,9 +403,10 @@ private fun ForecastRow(
     }
 }
 
-private fun showFirstDatePicker(context: Context, defaultDate: String, maxDate: String, onPicked: (String) -> Unit) {
+private fun showDatePicker(context: Context, defaultDate: String, maxDate: String, onPicked: (String) -> Unit) {
     val limit = LocalDate.parse(maxDate)
-    val initial = LocalDate.parse(defaultDate).let { if (it > limit) limit else it }
+    val parsed = runCatching { LocalDate.parse(defaultDate) }.getOrNull() ?: limit
+    val initial = if (parsed > limit) limit else parsed
     val dialog = DatePickerDialog(context, { _, year, month, day ->
         val picked = LocalDate.of(year, month + 1, day)
         if (picked <= limit) onPicked(picked.toString())
@@ -368,17 +422,20 @@ private fun showFirstDatePicker(context: Context, defaultDate: String, maxDate: 
 private fun wordForecastStatus(forecast: WordForecast): String = when (forecast) {
     is WordForecast.Completed -> "已完成"
     is WordForecast.Insufficient -> "数据不足"
+    is WordForecast.Stalled -> "进度停滞"
     is WordForecast.Estimated -> deltaStatus(forecast.planDeltaDays)
 }
 
 private fun subjectForecastStatus(forecast: SubjectForecast): String = when (forecast) {
     is SubjectForecast.NotStarted -> "未开始"
-    is SubjectForecast.Completed -> forecast.planDeltaDays?.let(::completionStatus) ?: "已完成"
+    is SubjectForecast.Completed -> forecast.planDeltaDays?.let(::completionStatus) ?: "缺完成日期"
     is SubjectForecast.Insufficient -> "数据不足"
+    is SubjectForecast.Stalled -> "已停滞"
     is SubjectForecast.Estimated -> deltaStatus(forecast.planDeltaDays)
 }
 
 private fun subjectForecastTone(forecast: SubjectForecast): ForecastTone = when {
+    forecast is SubjectForecast.Completed && forecast.completedDate == null -> ForecastTone.NEUTRAL
     forecast is SubjectForecast.Completed && (forecast.planDeltaDays ?: 0) > 0 -> ForecastTone.BAD
     else -> forecast.tone
 }
@@ -401,19 +458,24 @@ private fun completionStatus(deltaDays: Long): String = when {
 }
 
 private fun wordForecastMethod(forecast: WordForecast): String? = when (forecast) {
-    is WordForecast.Estimated, is WordForecast.Insufficient -> "近${FORECAST_WINDOW_DAYS}天"
+    is WordForecast.Estimated, is WordForecast.Insufficient, is WordForecast.Stalled -> "近${FORECAST_WINDOW_DAYS}天"
     is WordForecast.Completed -> null
 }
 
-private fun wordForecastGates(forecast: WordForecast): List<String> =
-    if (forecast is WordForecast.Insufficient) listOf("${forecast.activeDays}/$MIN_WORD_ACTIVE_DAYS 天") else emptyList()
+private fun wordForecastGates(forecast: WordForecast): List<String> = when (forecast) {
+    is WordForecast.Insufficient -> listOf("${forecast.activeDays}/$MIN_WORD_ACTIVE_DAYS 天")
+    is WordForecast.Stalled -> listOf("${forecast.activeDays}/$MIN_WORD_ACTIVE_DAYS 天")
+    else -> emptyList()
+}
 
 private fun subjectForecastMethod(forecast: SubjectForecast): String? = when (forecast) {
     is SubjectForecast.Estimated -> if (forecast.pace == SubjectPace.RECENT) "近${RECENT_CHAPTER_WINDOW_DAYS}天" else "平均"
+    is SubjectForecast.Stalled -> "近${RECENT_CHAPTER_WINDOW_DAYS}天"
     else -> null
 }
 
 private fun subjectForecastGates(forecast: SubjectForecast): List<String> = when (forecast) {
+    is SubjectForecast.Completed -> if (forecast.completedDate == null) listOf("缺完成日期") else emptyList()
     is SubjectForecast.Insufficient -> when (forecast.reason) {
         SubjectForecastGap.NO_CHAPTERS -> listOf("0/$MIN_CHAPTERS_FOR_FORECAST 章", "0/$MIN_CHAPTER_SPAN_DAYS 天")
         SubjectForecastGap.MISSING_FIRST_DATE -> listOf("${forecast.done}/$MIN_CHAPTERS_FOR_FORECAST 章", "缺首次日期")
@@ -431,7 +493,7 @@ private fun hoursForecastGates(forecast: HoursForecast): List<String> =
     if (forecast is HoursForecast.Insufficient) listOf("${forecast.activeDays}/$MIN_HOURS_ACTIVE_DAYS 天") else emptyList()
 
 @Composable
-private fun ScoreChart(scores: List<JSONObject>, selectedIndex: Int? = null, onSelect: ((Int) -> Unit)? = null) {
+private fun ScoreChart(scores: List<JSONObject>, selectedIndex: Int? = null, onSelect: ((Int?) -> Unit)? = null) {
     val c = webColors
     val textMeasurer = rememberTextMeasurer()
     val tickStyle = TextStyle(color = c.sub, fontSize = 9.sp)
@@ -440,15 +502,33 @@ private fun ScoreChart(scores: List<JSONObject>, selectedIndex: Int? = null, onS
     val ticks = ScoreChartMath.axisScores.map { it to textMeasurer.measure("$it", style = tickStyle) }
     val referenceLabel = textMeasurer.measure(referenceText, style = referenceStyle)
     val tapModifier = if (onSelect != null && scores.isNotEmpty()) {
-        Modifier.pointerInput(scores) {
+        Modifier.pointerInput(scores, selectedIndex) {
             detectTapGestures { offset ->
+                val left = size.width * ScoreChartMath.PLOT_LEFT / ScoreChartMath.VIEW_WIDTH
+                val right = size.width - size.width * ScoreChartMath.PLOT_RIGHT / ScoreChartMath.VIEW_WIDTH
+                val top = size.height * ScoreChartMath.PLOT_TOP / ScoreChartMath.VIEW_HEIGHT
+                val bottom = size.height - size.height * ScoreChartMath.PLOT_BOTTOM / ScoreChartMath.VIEW_HEIGHT
+                val pad = 16.dp.toPx()
+                if (offset.x < left - pad || offset.x > right + pad || offset.y < top - pad || offset.y > bottom + pad) {
+                    if (selectedIndex != null) onSelect(null)
+                    return@detectTapGestures
+                }
                 val points = ScoreChartMath.points(scores.map { it.optDouble("tot") }, size.width.toFloat(), size.height.toFloat())
                 val nearest = points.withIndex().minByOrNull { (_, p) ->
                     val dx = p.x - offset.x
                     val dy = p.y - offset.y
                     dx * dx + dy * dy
                 }
-                if (nearest != null) onSelect(nearest.index)
+                val maxDistSq = 48.dp.toPx().let { it * it }
+                if (nearest != null) {
+                    val dx = nearest.value.x - offset.x
+                    val dy = nearest.value.y - offset.y
+                    if (dx * dx + dy * dy <= maxDistSq) {
+                        onSelect(if (nearest.index == selectedIndex) null else nearest.index)
+                    } else if (selectedIndex != null) {
+                        onSelect(null)
+                    }
+                }
             }
         }
     } else Modifier
@@ -496,6 +576,24 @@ private fun ScorePartField(label: String, value: String, onValueChange: (String)
 private fun scoreAmount(value: Double): String =
     String.format(Locale.ROOT, if (value % 1.0 == 0.0) "%.0f" else "%.1f", value)
 
+@Composable
+private fun ProgressBarRow(label: String, value: String, progress: Float, color: Color, target: Float? = null) {
+    val c = webColors
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, Modifier.widthIn(min = 44.dp), color = c.sub, fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Box(Modifier.weight(1f).height(10.dp).clip(CircleShape).background(c.line)) {
+            Box(Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f)).background(color, CircleShape))
+            if (target != null) {
+                Canvas(Modifier.matchParentSize()) {
+                    val x = size.width * target.coerceIn(0f, 1f)
+                    drawLine(c.accent, Offset(x, 0f), Offset(x, size.height), 1.5.dp.toPx())
+                }
+            }
+        }
+        Text(value, Modifier.widthIn(min = 54.dp), textAlign = TextAlign.End, color = c.sub, fontSize = 11.5.sp, maxLines = 1)
+    }
+}
+
 // Web vStats: .stat two-column grid, weekly rate, .barrow, .wbar and .heat.
 @Composable
 internal fun StatsScreen(model: CheckinViewModel) {
@@ -538,7 +636,7 @@ internal fun StatsScreen(model: CheckinViewModel) {
         val max = shown.maxOfOrNull { it.second }?.coerceAtLeast(1.0) ?: 1.0
         shown.forEach { (subject, total) ->
             val color = when (subject) { "西综" -> c.subjectBlue; "英语" -> c.greenStrong; "政治" -> c.orange; else -> c.purple }
-            BarRow(subject, "${hours(total)}h", (total / max).toFloat(), color)
+            ProgressBarRow(subject, "${hours(total)}h", (total / max).toFloat(), color)
         }
         if (empty) {
             Spacer(Modifier.height(8.dp))
@@ -582,8 +680,9 @@ private fun WeeklyHoursChart(weeks: List<Pair<String, WeekStats>>) {
     val max = weeks.maxOf { maxOf(it.second.hours, it.second.target) }.coerceAtLeast(1.0)
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().height(108.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            weeks.forEach { (monday, stats) ->
-                val belowTarget = stats.hours < stats.target
+            weeks.forEachIndexed { index, (monday, stats) ->
+                val isCurrentWeek = index == weeks.lastIndex
+                val belowTarget = !isCurrentWeek && stats.hours < stats.target
                 Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("${hours(stats.hours)}h", fontSize = 8.5.sp, lineHeight = 12.sp, color = c.sub, maxLines = 1)
                     Canvas(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 1.dp)) {
@@ -654,13 +753,22 @@ private fun HeatMap(heatmap: List<HeatmapWeek>, today: String, planStart: String
             HeatmapWeek(monday, (0..6).map { StudyPlan.addDays(monday, it.toLong()) to 0 })
         }
     } else heatmap
+    val scrollState = rememberScrollState()
+    LaunchedEffect(shown.size) {
+        scrollState.scrollTo(scrollState.maxValue)
+    }
     Box(Modifier.fillMaxWidth()) {
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        Row(Modifier.horizontalScroll(scrollState), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
             shown.forEachIndexed { index, week ->
                 val monday = week.monday
+                val month = monday.substring(5, 7)
+                val showMonth = when {
+                    index == 0 -> shown.size == 1 || shown[1].monday.substring(5, 7) == month
+                    else -> month != StudyPlan.addDays(monday, -7).substring(5, 7)
+                }
                 Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Box(Modifier.width(11.dp).height(12.dp)) {
-                        Text(if (index == 0 || monday.substring(5, 7) != StudyPlan.addDays(monday, -7).substring(5, 7)) "${monday.substring(5, 7).toInt()}月" else "",
+                        Text(if (showMonth) "${month.toInt()}月" else "",
                             Modifier.wrapContentWidth(Alignment.Start, unbounded = true), fontSize = 9.sp, lineHeight = 12.sp, maxLines = 1, softWrap = false, color = c.sub)
                     }
                     week.completed.forEach { (date, completed) ->
@@ -672,8 +780,10 @@ private fun HeatMap(heatmap: List<HeatmapWeek>, today: String, planStart: String
                 }
             }
         }
-        Box(Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(18.dp)
-            .background(Brush.horizontalGradient(listOf(Color.Transparent, c.card))))
+        if (scrollState.canScrollForward) {
+            Box(Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(18.dp)
+                .background(Brush.horizontalGradient(listOf(Color.Transparent, c.card))))
+        }
     }
     Spacer(Modifier.height(8.dp))
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
@@ -708,15 +818,18 @@ internal fun MilestonesScreen(model: CheckinViewModel) {
         Tip("已走完 $passed% · ${if (remaining >= 0) "距初试还有 $remaining 天" else "初试已结束"} · 全程 $total 天")
     }
     Section("关键节点与检查点") {
-        model.plan.milestones.sortedBy { it.getString(0).ifEmpty { exam } }.forEachIndexed { index, milestone ->
+        model.plan.milestones.sortedBy { it.getString(0).ifEmpty { exam } }.forEach { milestone ->
             val date = milestone.getString(0).ifEmpty { exam }
+            val title = milestone.getString(1)
             val delta = daysBetween(model.today, date)
-            var expanded by rememberSaveable(index) { mutableStateOf(false) }
-            Row(Modifier.fillMaxWidth().heightIn(min = 58.dp).clickable { expanded = !expanded }.padding(horizontal = 2.dp, vertical = 11.dp),
+            var expanded by rememberSaveable(title) { mutableStateOf(false) }
+            Row(Modifier.fillMaxWidth().heightIn(min = 58.dp)
+                .semantics { stateDescription = if (expanded) "已展开" else "已折叠" }
+                .clickable { expanded = !expanded }.padding(horizontal = 2.dp, vertical = 11.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(milestone.getString(1), Modifier.weight(1f), fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, color = c.text)
+                Text(if (expanded) "▾" else "▸", fontSize = 12.sp, color = c.sub)
+                Text(title, Modifier.weight(1f), fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, color = c.text)
                 Text(date, color = c.sub, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                Chip("预计", c.orange, c.chipOrange)
                 Chip(if (delta > 0) "还有 $delta 天" else if (delta == 0L) "就是今天" else "已过 ${-delta} 天",
                     if (delta < 0) c.sub else c.accent, if (delta < 0) c.line else c.chipBlue)
             }
@@ -726,7 +839,14 @@ internal fun MilestonesScreen(model: CheckinViewModel) {
     }
     // Preserve the existing Android phase route, after the web's milestone sections.
     Section("阶段路线") {
-        val phases = model.plan.data.arr("PHASES").values().map { it as JSONObject } + model.plan.phase("2027-12-01", model.state) + model.plan.data.obj("PH5")
+        val ph4 = model.plan.data.obj("PH4").copyJson().apply {
+            if (exam > "2027-12-01") {
+                put("s", "2027-12-01")
+                put("e", StudyPlan.addDays(exam, -1))
+            }
+        }
+        val ph5 = model.plan.data.obj("PH5").copyJson().put("s", exam).put("e", "2028-08-31")
+        val phases = model.plan.data.arr("PHASES").values().map { it as JSONObject } + ph4 + ph5
         phases.distinctBy { it.getString("id") }.forEach { phase ->
             Text(phase.getString("name"), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = c.text)
             Tip("${phase.optString("s", exam)} — ${phase.optString("e", "2028-08-31")} · ${phase.getString("desc")}")

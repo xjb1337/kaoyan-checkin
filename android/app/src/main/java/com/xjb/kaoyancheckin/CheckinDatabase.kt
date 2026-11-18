@@ -25,6 +25,18 @@ interface CheckinDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun write(document: CheckinDocument)
+
+    @Query("SELECT json FROM document WHERE id = :id")
+    fun readByIdBlocking(id: Int): String?
+
+    @Query("SELECT LENGTH(json) FROM document WHERE id = :id")
+    fun readLengthBlocking(id: Int): Int?
+
+    @Query("SELECT SUBSTR(json, :start, :length) FROM document WHERE id = :id")
+    fun readChunkBlocking(id: Int, start: Int, length: Int): String?
+
+    @Query("DELETE FROM document WHERE id = :id")
+    fun deleteByIdBlocking(id: Int)
 }
 
 @Database(entities = [CheckinDocument::class], version = 1, exportSchema = false)

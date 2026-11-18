@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -25,10 +26,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -50,7 +55,10 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
         )
-        if (CheckinWidget.isOpenToday(intent)) openTodaySignal++
+        if (savedInstanceState == null && CheckinWidget.isOpenToday(intent)) {
+            openTodaySignal++
+            intent?.action = null
+        }
         val themeFactory = ThemeViewModel.factory(application)
         setContent {
             // Keep all ViewModels outside the theme provider so changing colors preserves drafts and navigation.
@@ -73,7 +81,10 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (CheckinWidget.isOpenToday(intent)) openTodaySignal++
+        if (CheckinWidget.isOpenToday(intent)) {
+            openTodaySignal++
+            intent.action = null
+        }
     }
 }
 
@@ -108,10 +119,15 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
             lifecycle.removeObserver(observer)
         }
     }
-    DisposableEffect(lifecycle, model) {
+    DisposableEffect(lifecycle, model, context) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> { model.resume(); model.refresh(); updates.onResume() }
+                Lifecycle.Event.ON_RESUME -> {
+                    model.resume()
+                    model.refresh()
+                    updates.onResume()
+                    runCatching { CheckinWidget.refreshAll(context) }
+                }
                 Lifecycle.Event.ON_PAUSE -> model.flushDrafts()
                 else -> Unit
             }
@@ -119,11 +135,14 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
         lifecycle.addObserver(observer)
         onDispose { model.flushDrafts(); lifecycle.removeObserver(observer) }
     }
+    BackHandler(enabled = model.page != 0 || model.selected != model.today) {
+        if (model.page != 0) model.page = 0 else model.selected = model.today
+    }
     LaunchedEffect(openTodaySignal) {
         if (openTodaySignal > 0) { model.page = 0; model.selected = model.currentDay() }
     }
     UpdateDialog(updates, model::notify)
-    LaunchedEffect(model) { model.events.collect { notices.showSnackbar(it) } }
+    LaunchedEffect(model) { model.events.collectLatest { notices.showSnackbar(it) } }
     LaunchedEffect(model, lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             snapshotFlow { model.pendingUndo }.collectLatest { step ->
@@ -142,33 +161,47 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
         }
     }
     LaunchedEffect(lifecycle) {
-        while (true) {
-            delay(CheckinCore.todayRefreshDelayMillis())
-            if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) model.resume()
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                delay(CheckinCore.todayRefreshDelayMillis())
+                model.resume()
+            }
         }
     }
     val c = webColors
+    var planSubPage by rememberSaveable { mutableIntStateOf(0) }
+    var reviewSubPage by rememberSaveable { mutableIntStateOf(0) }
+    val hasData = remember(model.state) { CheckinCore.hasData(model.state) }
     Column(Modifier.fillMaxSize().background(c.bg).imePadding()
         .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))) {
         Header(model)
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
             if (!model.ready) CircularProgressIndicator(Modifier.align(Alignment.Center))
-            else key(model.page, openTodaySignal) {
-                var planSubPage by rememberSaveable { mutableStateOf(0) }
-                var reviewSubPage by rememberSaveable { mutableStateOf(0) }
-                Column(Modifier.widthIn(max = 540.dp).fillMaxWidth().verticalScroll(rememberScrollState())
+            else {
+                val scrollKey = when (model.page) {
+                    1 -> "plan-$planSubPage"
+                    2 -> "review-$reviewSubPage"
+                    else -> "tab-${model.page}"
+                }
+                val scrollState = key(scrollKey, openTodaySignal) { rememberScrollState() }
+                Column(Modifier.widthIn(max = 540.dp).fillMaxWidth().verticalScroll(scrollState)
                     .padding(horizontal = 12.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (model.loadError.isNotEmpty()) Section("存档读取异常") {
                         Text(model.loadError, color = c.red)
                         WebButton("前往设置，导出原始存档或恢复", { model.page = 3 })
                     }
-                    if (!CheckinCore.hasData(model.state) && model.page != 3 && !onboardingDismissed) Section {
+                    if (!hasData && model.page != 3 && !onboardingDismissed) Section {
                         Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("开始使用", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = c.sub)
-                            Text("✕", Modifier.clip(androidx.compose.foundation.shape.CircleShape)
-                                .clickable { onboardingDismissed = true }
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
-                                color = c.sub, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Box(
+                                Modifier.defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape)
+                                    .clickable(role = Role.Button) { onboardingDismissed = true }
+                                    .semantics { contentDescription = "关闭引导" },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text("✕", color = c.sub, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             WebButton("导入网页备份", { model.page = 3 }, Modifier.weight(1f))
@@ -192,9 +225,26 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
                     }
                 }
             }
-            Column(Modifier.align(Alignment.BottomCenter).widthIn(max = 540.dp).fillMaxWidth()) {
-                UndoSnackbarHost(notices)
-                UndoSnackbarHost(snackbar)
+            val hasSnackbar = notices.currentSnackbarData != null || snackbar.currentSnackbarData != null
+            Column(
+                Modifier.align(Alignment.BottomCenter).widthIn(max = 540.dp).fillMaxWidth()
+                    .then(
+                        if (hasSnackbar) {
+                            Modifier.background(
+                                Brush.verticalGradient(
+                                    0f to c.bg.copy(alpha = 0f),
+                                    0.22f to c.bg.copy(alpha = 0.88f),
+                                    0.50f to c.bg,
+                                    1f to c.bg,
+                                ),
+                            ).padding(top = 24.dp)
+                        } else {
+                            Modifier
+                        }
+                    ),
+            ) {
+                UndoSnackbarHost(notices, showScrim = false)
+                UndoSnackbarHost(snackbar, showScrim = false)
             }
         }
         TabBar(model.page) { model.page = it }
@@ -205,17 +255,31 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
 @Composable
 private fun Header(model: CheckinViewModel) {
     val c = webColors
-    val phase = if (!model.ready) "" else if (model.today < model.plan.start) "${model.plan.start.substring(5, 7).toInt()}月${model.plan.start.substring(8).toInt()}日开始" else model.plan.phase(model.today, model.state).getString("name")
-    val remaining = if (model.ready) daysBetween(model.today, model.plan.exam(model.state)) else 0
+    val phase = remember(model.ready, model.today, model.state) {
+        if (!model.ready) ""
+        else if (model.today < model.plan.start) "${model.plan.start.substring(5, 7).toInt()}月${model.plan.start.substring(8).toInt()}日开始"
+        else model.plan.phase(model.today, model.state).getString("name")
+    }
+    val remaining = remember(model.ready, model.today, model.state) {
+        if (model.ready) daysBetween(model.today, model.plan.exam(model.state)) else 0
+    }
+    val examYear = remember(model.ready, model.state) {
+        if (model.ready) model.plan.exam(model.state).take(4) else ""
+    }
     Column(Modifier.fillMaxWidth().background(c.bg)
         .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(Modifier.widthIn(max = 540.dp).fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Column(Modifier.weight(1f)) {
-                Text("考研打卡 · 2028", style = MaterialTheme.typography.titleLarge, color = c.text, maxLines = 1)
-                Text(phase, style = MaterialTheme.typography.bodySmall, color = c.sub, maxLines = 1)
+                Text(
+                    if (examYear.isNotEmpty()) "考研打卡 · $examYear" else "考研打卡",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = c.text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(phase, style = MaterialTheme.typography.bodySmall, color = c.sub, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Text("本机记录", fontSize = 11.sp, color = c.sub, maxLines = 1)
             Text(if (remaining >= 0) "距初试 $remaining 天" else "初试已结束",
                 Modifier.background(c.blue, androidx.compose.foundation.shape.CircleShape).padding(horizontal = 10.dp, vertical = 4.dp),
                 color = androidx.compose.ui.graphics.Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)

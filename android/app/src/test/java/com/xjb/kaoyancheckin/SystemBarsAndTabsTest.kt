@@ -17,6 +17,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ApplicationProvider
 import com.xjb.kaoyancheckin.ui.theme.AppTheme
 import com.xjb.kaoyancheckin.ui.theme.paletteFor
+import java.time.Clock
+import java.time.Instant
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -82,6 +84,40 @@ class SystemBarsAndTabsTest {
                 }
                 compose.onNodeWithText("计划").assertIsSelected()
             }
+        }
+    }
+
+    @Test
+    fun subTabSelectionSurvivesMainTabSwitchAndWordsQuickAddCapsAt2000() {
+        val previousClock = CheckinCore.clock
+        CheckinCore.clock = Clock.fixed(Instant.parse("2026-11-10T04:00:00Z"), CheckinCore.shanghai)
+        try {
+            database.launchActivity().use { scenario ->
+                lateinit var model: CheckinViewModel
+                scenario.onActivity { model = ViewModelProvider(it)[CheckinViewModel::class.java] }
+                compose.waitUntil(timeoutMillis = 15_000) {
+                    shadowOf(Looper.getMainLooper()).idle()
+                    model.ready
+                }
+                compose.onNodeWithText("计划").performClick()
+                compose.onNodeWithText("阶段节点").performClick().assertIsSelected()
+                compose.onNodeWithText("今日").performClick()
+                compose.onNodeWithText("计划").performClick()
+                compose.onNodeWithText("阶段节点").assertIsSelected()
+
+                val date = "2026-11-10"
+                compose.runOnIdle {
+                    model.adjustWords(date, "n", 20)
+                    model.adjustWords(date, "n", 2500)
+                }
+                compose.waitUntil(timeoutMillis = 15_000) {
+                    shadowOf(Looper.getMainLooper()).idle()
+                    model.state.obj("days").optJSONObject(date)?.obj("w")?.optInt("n") == 2000
+                }
+                assertEquals(2000, model.state.obj("days").obj(date).obj("w").optInt("n"))
+            }
+        } finally {
+            CheckinCore.clock = previousClock
         }
     }
 }

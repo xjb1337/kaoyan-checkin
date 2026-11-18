@@ -20,7 +20,13 @@ internal fun UpdateSettings(model: UpdateViewModel) {
     Section("应用更新") {
         Tip("检查更新时会访问 GitHub；学习数据仍只保存在本机。")
         Spacer(Modifier.height(8.dp))
-        WebButton(if (model.checking) "正在检查…" else "检查更新", { model.check() }, Modifier.fillMaxWidth(),
+        val label = when {
+            model.checking -> "正在检查…"
+            model.downloading -> "正在下载…"
+            model.hasVerifiedApk -> "安装新版本"
+            else -> "检查更新"
+        }
+        WebButton(label, { if (model.hasVerifiedApk) model.update() else model.check() }, Modifier.fillMaxWidth(),
             enabled = !model.checking && !model.downloading, big = true)
     }
 }
@@ -57,14 +63,17 @@ internal fun UpdateDialog(model: UpdateViewModel, notify: (String) -> Unit) {
             when {
                 model.downloading -> TextButton(onClick = { model.cancelDownload() }) { Text("取消下载") }
                 model.permissionNeeded -> TextButton(onClick = { model.openPermissionSettings() }) { Text("前往设置") }
-                update != null -> TextButton(onClick = { model.update() }) { Text("更新") }
+                update != null -> TextButton(onClick = { model.update() }) { Text(if (model.hasVerifiedApk) "安装新版本" else "更新") }
                 else -> TextButton(onClick = { model.dismiss() }) { Text("知道了") }
             }
         },
         dismissButton = {
-            Row {
-                TextButton(onClick = { openRelease() }) { Text("手动下载") }
-                if (!model.downloading && update != null) TextButton(onClick = { model.dismiss() }) { Text("稍后") }
+            val isLatestOnly = update == null && model.message == "已是最新版本。"
+            if (!isLatestOnly) {
+                Row {
+                    TextButton(onClick = { openRelease() }) { Text("手动下载") }
+                    if (!model.downloading && update != null) TextButton(onClick = { model.dismiss() }) { Text("稍后") }
+                }
             }
         },
     )

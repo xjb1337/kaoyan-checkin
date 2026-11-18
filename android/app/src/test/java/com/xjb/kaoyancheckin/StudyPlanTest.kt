@@ -128,10 +128,30 @@ class StudyPlanTest {
         plan.deleteCustomTask(day, "r:阅读")
         assertEquals(listOf("整理错题"), day.arr("c").values().map { (it as JSONObject).getString("n") })
         assertEquals(listOf("阅读"), state.arr("recur").values())
+        assertFalse(plan.tasks("2026-11-09", state, "2026-11-09").any { it.id == "r:阅读" })
+        assertTrue(plan.tasks("2026-11-10", state, "2026-11-10").any { it.id == "r:阅读" })
 
         plan.deleteCustomTask(day, "c:整理错题")
         assertEquals(0, day.arr("c").length())
         assertEquals(listOf("阅读"), state.arr("recur").values())
+    }
+
+    @Test fun recurringStartDateAndRetirementPreserveHistoryAndPhaseCopiesAreIsolated() {
+        val state = CheckinCore.emptyState()
+        StudyPlan.addRecurringTask(state, "新固定", "2026-11-10")
+        assertFalse(plan.tasks("2026-11-09", state, "2026-11-10").any { it.id == "r:新固定" })
+        assertTrue(plan.tasks("2026-11-10", state, "2026-11-10").any { it.id == "r:新固定" })
+
+        val past = StudyPlan.day().apply { arr("c").put(JSONObject().put("n", "旧固定").put("d", false)) }
+        state.obj("days").put("2026-11-05", past)
+        StudyPlan.retireRecurringTask(state, "旧固定")
+        assertFalse(plan.tasks("2026-11-05", state, "2026-11-10").any { it.label == "旧固定" })
+
+        state.obj("settings").put("exam", "2027-06-01")
+        val legacy = plan.phase("2026-10-01", state)
+        assertEquals("旧计划 · 生理启动", legacy.getString("name"))
+        legacy.put("name", "mutated")
+        assertEquals("旧计划 · 生理启动", plan.phase("2026-10-01", state).getString("name"))
     }
 
     @Test fun copiesPreviousWeekGoalsAndResetsCompletion() {

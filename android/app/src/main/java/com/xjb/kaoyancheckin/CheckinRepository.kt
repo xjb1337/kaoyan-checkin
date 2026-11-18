@@ -8,6 +8,9 @@ import kotlinx.coroutines.withContext
 /** One process-wide store, lock, and Room connection; the connection lives with the process. */
 internal object CheckinRepository {
     private const val DATABASE_NAME = "checkin.db"
+    private const val MAIN_DOCUMENT_ID = 1
+    private const val RECOVERY_DOCUMENT_ID = 2
+    private const val CHUNK_SIZE = 250_000
 
     @Volatile private var connection: Connection? = null
 
@@ -19,9 +22,32 @@ internal object CheckinRepository {
         private val database = Room.databaseBuilder(context, CheckinDatabase::class.java, DATABASE_NAME).build()
         private var closed = false
         val store = DocumentStore(
-            readRaw = { access { it.readBlocking() } },
-            writeRaw = { json -> access { it.writeBlocking(CheckinDocument(json = json)) } },
+            readRaw = { access { readSafe(it, MAIN_DOCUMENT_ID) } },
+            writeRaw = { json -> access { it.writeBlocking(CheckinDocument(MAIN_DOCUMENT_ID, json)) } },
+            readRecovery = { access { readSafe(it, RECOVERY_DOCUMENT_ID) } },
+            writeRecovery = { recovery ->
+                access {
+                    if (recovery.isNullOrEmpty()) it.deleteByIdBlocking(RECOVERY_DOCUMENT_ID)
+                    else it.writeBlocking(CheckinDocument(RECOVERY_DOCUMENT_ID, recovery))
+                }
+            },
         )
+
+        private fun readSafe(dao: CheckinDao, id: Int): String? {
+            return try {
+                dao.readByIdBlocking(id)
+            } catch (_: Exception) {
+                val total = dao.readLengthBlocking(id) ?: return null
+                if (total == 0) return ""
+                buildString(total) {
+                    var start = 1
+                    while (start <= total) {
+                        append(dao.readChunkBlocking(id, start, CHUNK_SIZE).orEmpty())
+                        start += CHUNK_SIZE
+                    }
+                }
+            }
+        }
 
         private suspend fun <T> access(block: (CheckinDao) -> T): T = withContext(Dispatchers.IO) {
             synchronized(this@Connection) {

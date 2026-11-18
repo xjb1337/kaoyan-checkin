@@ -89,20 +89,29 @@ internal fun UndoSnackbar(
 }
 
 @Composable
-internal fun UndoSnackbarHost(hostState: SnackbarHostState, modifier: Modifier = Modifier) {
+internal fun UndoSnackbarHost(
+    hostState: SnackbarHostState,
+    modifier: Modifier = Modifier,
+    showScrim: Boolean = true,
+) {
     SnackbarHost(hostState, modifier) { data ->
         val background = webColors.bg
         Box(
             Modifier.fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        0f to background.copy(alpha = 0f),
-                        0.22f to background.copy(alpha = 0.88f),
-                        0.50f to background,
-                        1f to background,
-                    ),
-                )
-                .padding(top = 24.dp),
+                .then(
+                    if (showScrim) {
+                        Modifier.background(
+                            Brush.verticalGradient(
+                                0f to background.copy(alpha = 0f),
+                                0.22f to background.copy(alpha = 0.88f),
+                                0.50f to background,
+                                1f to background,
+                            ),
+                        ).padding(top = 24.dp)
+                    } else {
+                        Modifier
+                    }
+                ),
             contentAlignment = Alignment.BottomCenter,
         ) {
             UndoSnackbar(

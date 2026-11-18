@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,6 +32,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
@@ -41,6 +43,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xjb.kaoyancheckin.ui.theme.webColors
@@ -117,7 +120,7 @@ internal fun RoundCheck(checked: Boolean) {
     Canvas(Modifier.size(22.dp)) {
         val stroke = 2.dp.toPx()
         drawCircle(if (checked) c.blue else Color.Transparent)
-        drawCircle(if (checked && !c.dark) c.blue else if (checked) c.accent else Color(0xFFCBD5E1), style = androidx.compose.ui.graphics.drawscope.Stroke(stroke))
+        drawCircle(if (checked && !c.dark) c.blue else if (checked) c.accent else lerp(c.sub, c.line, 0.45f), style = androidx.compose.ui.graphics.drawscope.Stroke(stroke))
         if (checked) {
             drawLine(Color.White, Offset(size.width * .25f, size.height * .52f), Offset(size.width * .43f, size.height * .70f), strokeWidth = stroke, cap = StrokeCap.Round)
             drawLine(Color.White, Offset(size.width * .43f, size.height * .70f), Offset(size.width * .77f, size.height * .31f), strokeWidth = stroke, cap = StrokeCap.Round)
@@ -180,6 +183,7 @@ internal fun WebInput(
     enabled: Boolean = true, numeric: Boolean = false, singleLine: Boolean = true,
     minHeight: androidx.compose.ui.unit.Dp = 44.dp, textAlign: TextAlign = TextAlign.Start,
     trailing: (@Composable () -> Unit)? = null, integer: Boolean = false,
+    onDone: (() -> Unit)? = null,
 ) {
     val c = webColors
     val focus = LocalFocusManager.current
@@ -189,7 +193,7 @@ internal fun WebInput(
         cursorBrush = SolidColor(c.accent),
         keyboardOptions = KeyboardOptions(keyboardType = if (integer) KeyboardType.Number else if (numeric) KeyboardType.Decimal else KeyboardType.Text,
             imeAction = if (singleLine) ImeAction.Done else ImeAction.Default),
-        keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
+        keyboardActions = KeyboardActions(onDone = { if (onDone != null) onDone() else focus.clearFocus() }),
         decorationBox = { inner ->
             Row(Modifier.fillMaxWidth().heightIn(min = minHeight).clip(RoundedCornerShape(10.dp)).background(c.bg)
                 .border(1.dp, c.line, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 10.dp),
@@ -208,10 +212,17 @@ internal fun SaveField(label: String, saved: String, identity: String, enabled: 
     singleLine: Boolean = true, showLabel: Boolean = true, placeholder: String = label,
     trailing: (@Composable () -> Unit)? = null, integer: Boolean = false, save: (String) -> Unit) {
     var draft by rememberSaveable(identity, saved) { mutableStateOf(saved) }
+    val focus = LocalFocusManager.current
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (showLabel) Text(label, fontSize = 11.5.sp, color = webColors.sub)
         WebInput(draft, { draft = it }, placeholder, Modifier.fillMaxWidth(), enabled, numeric, singleLine,
-            minHeight = if (singleLine) 44.dp else 70.dp, trailing = trailing, integer = integer)
+            minHeight = if (singleLine) 44.dp else 70.dp, trailing = trailing, integer = integer,
+            onDone = if (singleLine) {
+                {
+                    if (enabled && draft != saved) save(draft)
+                    focus.clearFocus()
+                }
+            } else null)
         if (enabled && draft != saved) WebButton("保存$label", { save(draft) })
     }
 }
@@ -235,11 +246,20 @@ internal fun AutoSaveField(model: CheckinViewModel, field: DraftField, label: St
 }
 
 @Composable
-internal fun AddField(placeholder: String, enabled: Boolean = true, button: String = "添加", add: (String) -> Unit) {
-    var draft by rememberSaveable { mutableStateOf("") }
+internal fun AddField(placeholder: String, enabled: Boolean = true, button: String = "添加", draftKey: String = placeholder, add: (String) -> Unit) {
+    var draft by rememberSaveable(draftKey) { mutableStateOf("") }
+    val focus = LocalFocusManager.current
+    val submit = {
+        val trimmed = draft.trim()
+        if (enabled && trimmed.isNotEmpty()) {
+            add(trimmed)
+            draft = ""
+            focus.clearFocus()
+        }
+    }
     Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        WebInput(draft, { draft = it }, placeholder, Modifier.weight(1f), enabled = enabled)
-        WebButton(button, enabled = enabled && draft.isNotBlank(), onClick = { add(draft.trim()); draft = "" })
+        WebInput(draft, { draft = it }, placeholder, Modifier.weight(1f), enabled = enabled, onDone = submit)
+        WebButton(button, enabled = enabled && draft.isNotBlank(), onClick = submit)
     }
 }
 
@@ -250,7 +270,7 @@ internal fun DateNav(date: String, previous: () -> Unit, next: () -> Unit, curre
     status: String? = null, statusColor: Color? = null, statusBackground: Color? = null, onDate: (String) -> Unit = {}) {
     val context = LocalContext.current
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
-        WebButton("‹", previous, Modifier.width(44.dp))
+        WebButton("‹", previous, Modifier.width(44.dp), accessibilityLabel = if (datePicker) "上一天" else "上一周")
         if (datePicker) {
             val value = LocalDate.parse(date)
             val limit = maxDate?.let { LocalDate.parse(it) }
@@ -272,16 +292,17 @@ internal fun DateNav(date: String, previous: () -> Unit, next: () -> Unit, curre
                     dialog.show()
                 }.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("${shortDate(date)}/${date.take(4)}", Modifier.weight(1f), textAlign = TextAlign.Center,
-                    color = webColors.text, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    color = webColors.text, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (status != null) Chip(status, statusColor ?: webColors.accent, statusBackground ?: webColors.chipBlue)
                 Spacer(Modifier.width(6.dp))
                 CalendarIcon()
             }
         } else {
-            Text("${shortDate(date)} ~ ${shortDate(StudyPlan.addDays(date, 6))}", Modifier.widthIn(min = 130.dp),
-                textAlign = TextAlign.Center, color = webColors.text, fontSize = 15.sp, maxLines = 1)
+            Text("${shortDate(date)} ~ ${shortDate(StudyPlan.addDays(date, 6))}", Modifier.weight(1f),
+                textAlign = TextAlign.Center, color = webColors.text, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        WebButton("›", { if (canGoNext) next() }, Modifier.width(44.dp), enabled = canGoNext)
+        WebButton("›", { if (canGoNext) next() }, Modifier.width(44.dp), enabled = canGoNext,
+            accessibilityLabel = if (datePicker) "下一天" else "下一周")
         WebButton(currentLabel, current, enabled = !isCurrent, primary = !isCurrent)
     }
 }
@@ -339,7 +360,7 @@ internal fun Banner(text: String, type: String = "warn", action: (@Composable Ro
 internal fun ProgressBar(progress: Float, modifier: Modifier = Modifier, height: androidx.compose.ui.unit.Dp = 6.dp) {
     Box(modifier.fillMaxWidth().height(height).clip(CircleShape).background(webColors.line)) {
         Box(Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f))
-            .background(Brush.horizontalGradient(listOf(webColors.blue, Color(0xFF16A34A))), CircleShape))
+            .background(Brush.horizontalGradient(listOf(webColors.blue, webColors.progressHighlight)), CircleShape))
     }
 }
 
@@ -347,7 +368,7 @@ internal fun ProgressBar(progress: Float, modifier: Modifier = Modifier, height:
 internal fun BarRow(label: String, value: String, progress: Float, color: Color, target: Float? = null) {
     val targetColor = webColors.accent
     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(label, Modifier.width(44.dp), color = webColors.sub, fontSize = 12.5.sp)
+        Text(label, Modifier.widthIn(min = 44.dp), color = webColors.sub, fontSize = 12.5.sp)
         Box(Modifier.weight(1f).height(10.dp).clip(CircleShape).background(webColors.line)) {
             Box(Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f)).background(color, CircleShape))
             if (target != null) {
@@ -357,7 +378,7 @@ internal fun BarRow(label: String, value: String, progress: Float, color: Color,
                 }
             }
         }
-        Text(value, Modifier.width(46.dp), textAlign = TextAlign.End, color = webColors.sub, fontSize = 11.5.sp, maxLines = 1)
+        Text(value, Modifier.widthIn(min = 46.dp), textAlign = TextAlign.End, color = webColors.sub, fontSize = 11.5.sp, maxLines = 1)
     }
 }
 
@@ -372,9 +393,9 @@ internal fun SegmentedBar(options: List<String>, selected: Int, onSelect: (Int) 
         options.forEachIndexed { index, label ->
             val active = selected == index
             Box(
-                Modifier.weight(1f).clip(RoundedCornerShape(9.dp))
+                Modifier.weight(1f).heightIn(min = 40.dp).clip(RoundedCornerShape(9.dp))
                     .background(if (active) c.blue else Color.Transparent)
-                    .clickable { onSelect(index) }
+                    .selectable(active, role = Role.Tab, onClick = { onSelect(index) })
                     .padding(vertical = 8.dp),
                 contentAlignment = Alignment.Center,
             ) {

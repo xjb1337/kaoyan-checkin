@@ -132,7 +132,7 @@ class CheckinCoreTest {
         raw.obj("settings").put("backupDays", 30)
         assertFalse(CheckinCore.needsBackup(raw, 33 * day))
         assertTrue(CheckinCore.needsBackup(raw, 34 * day))
-        val weekly = base().put("weeks", JSONObject().put("2026-09-07", StudyPlan.week()))
+        val weekly = base().put("weeks", JSONObject().put("2026-09-07", StudyPlan.week().put("review", "周复盘")))
         assertTrue(CheckinCore.needsBackup(weekly, 10 * day))
     }
 
@@ -182,12 +182,29 @@ class CheckinCoreTest {
     @Test fun realStudyDataButNotEmptyPlaceholderDatesTriggersBackup() {
         assertFalse(CheckinCore.hasData(JSONObject()))
         assertFalse(CheckinCore.hasData(JSONObject("""{"days":{"d":{"t":{"words":false},"c":[],"rw":{}}}}""")))
+        assertFalse(CheckinCore.hasData(JSONObject("""{"weeks":{"w":{}}}""")))
+        assertFalse(CheckinCore.hasData(JSONObject("""{"ch":{"phys":[]}}""")))
+        assertFalse(CheckinCore.hasData(JSONObject("""{"ch":{"phys":[false,false]}}""")))
+        assertFalse(CheckinCore.hasData(CheckinCore.emptyState()))
         listOf(
             """{"days":{"d":{"h":1}}}""", """{"days":{"d":{"t":{"words":true}}}}""",
             """{"days":{"d":{"c":[{"n":"x","d":false}]}}}""", """{"days":{"d":{"rw":{"g":"收获"}}}}""",
-            """{"weeks":{"w":{}}}""", """{"scores":[{}]}""", """{"ch":{"phys":[]}}""", """{"recur":["阅读"]}"""
-        ).forEach { assertTrue(CheckinCore.hasData(JSONObject(it))) }
-        assertFalse(CheckinCore.hasData(base().put("mk", JSONArray().put("2026-09-13"))))
+            """{"weeks":{"w":{"review":"复盘"}}}""", """{"scores":[{}]}""", """{"ch":{"phys":[true]}}""",
+            """{"recur":["阅读"]}""", """{"mk":["2026-09-13"]}""", """{"settings":{"exam":"2028-01-01"}}"""
+        ).forEach { assertTrue(it, CheckinCore.hasData(JSONObject(it))) }
+    }
+
+    @Test fun explicitJsonNullsAndExamRangeAreValidatedCleanly() {
+        val withNulls = """{"schemaVersion":null,"days":{"2026-11-02":{"t":null,"c":null,"w":null,"rw":null}},"settings":{},"_recovery":null}"""
+        val out = CheckinCore.parseBackup(withNulls)
+        assertEquals(CheckinCore.DEFAULT_WORD_BASE, out.obj("settings").getInt("wordBase"))
+        assertEquals(CheckinCore.DEFAULT_WORD_GOAL, out.obj("settings").getInt("wordGoal"))
+        assertFalse(out.has("_recovery"))
+
+        listOf("2026-11-01", "2028-09-01").forEach { badExam ->
+            val raw = base().apply { obj("settings").put("exam", badExam) }
+            rejects("初试日期格式错误") { CheckinCore.normalizeState(raw) }
+        }
     }
 
     @Test fun jsFalsyDefaultsAndTruthyTipArePreserved() {

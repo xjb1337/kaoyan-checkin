@@ -22,6 +22,7 @@ class DraftPatchTest {
             DraftField.WeekGoal(week, 2) to "",
             DraftField.WeekReview(week) to "",
             DraftField.Hours(today, "西综") to "0.00",
+            DraftField.Hours(today, "西综") to "",
         )
         blanks.forEach { (field, value) -> assertNull(patchDraft(state, field, value, today, now)) }
         assertEquals(original, state.toString())
@@ -66,7 +67,7 @@ class DraftPatchTest {
         val state = CheckinCore.emptyState()
         state.obj("days").put(today, StudyPlan.day().put("h", 23).put("sh", JSONObject().put("英语", 23)))
         val original = state.toString()
-        listOf("", "NaN", "Infinity", "-1", "24.1", "2").forEach { input ->
+        listOf("NaN", "Infinity", "-1", "24.1", "2").forEach { input ->
             assertThrows(IllegalArgumentException::class.java) {
                 patchDraft(state, DraftField.Hours(today, "西综"), input, today, now)
             }

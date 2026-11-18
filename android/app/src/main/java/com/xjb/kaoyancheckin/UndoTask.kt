@@ -50,9 +50,26 @@ internal fun undoTask(state: JSONObject, plan: StudyPlan, token: String, today: 
     val step = liveUndo(state, now)?.takeIf { it.token == token && it.date <= today } ?: return null
     val day = state.obj("days").optJSONObject(step.date) ?: return null
     if (plan.isDone(day, step.taskId) == step.wasDone) return null
-    if ((step.taskId.startsWith("r:") || step.taskId.startsWith("c:")) &&
+    if (step.taskId.startsWith("c:") &&
         day.arr("c").values().filterIsInstance<JSONObject>().none { it.optString("n") == step.taskId.substring(2) }) return null
+    if (step.taskId.startsWith("r:")) {
+        val name = step.taskId.substring(2)
+        if (name !in state.arr("recur").values() || name in day.arr("sk").values()) return null
+    }
     toggleDayTask(state, plan, step.date, today, step.taskId, now)
+    if (step.date < plan.start && isDayRecordEmpty(day)) {
+        state.obj("days").remove(step.date)
+    }
     state.remove("_undo")
     return state
 }
+
+private fun isDayRecordEmpty(day: JSONObject): Boolean =
+    day.obj("t").namesList().none { day.obj("t").optBoolean(it) } &&
+        day.arr("c").length() == 0 &&
+        day.arr("sk").length() == 0 &&
+        day.optDouble("h", 0.0) == 0.0 &&
+        day.obj("sh").namesList().none { day.obj("sh").optDouble(it, 0.0) != 0.0 } &&
+        day.obj("w").optInt("n", 0) == 0 &&
+        day.obj("w").optInt("r", 0) == 0 &&
+        listOf("g", "s", "n").all { day.obj("rw").optString(it).isEmpty() }

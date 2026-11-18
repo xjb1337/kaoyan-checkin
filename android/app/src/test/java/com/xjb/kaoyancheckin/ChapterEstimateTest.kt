@@ -14,21 +14,21 @@ class ChapterEstimateTest {
 
     @Test fun emptyBeforeStartAndMissingDatesAreExplicit() {
         assertEquals(ChapterEstimateInfo("尚未开始"), estimate(today = "2026-10-31"))
+        assertEquals(ChapterEstimateInfo("已有勾选", "缺首次日期"), estimate(today = "2026-10-31", done = 1))
         assertEquals(ChapterEstimateInfo("0/10 章", "待勾选"), estimate())
         assertEquals(ChapterEstimateInfo("暂无章节"), estimate(done = 0, total = 0, first = "2026-11-10"))
         assertEquals(ChapterEstimateInfo("已有勾选", "缺首次日期"), estimate(done = 1))
+        assertEquals(ChapterEstimateInfo("1/10 章", "数据不足"), estimate(done = 1, first = "2026-11-01"))
+        assertEquals(ChapterEstimateInfo("5/10 章", "数据不足"), estimate(done = 5, first = "2026-11-09"))
     }
 
     @Test fun projectedDatesUseInclusiveDaysAndCompareWithPlan() {
-        assertEquals(ChapterEstimateInfo("预计 2026-11-12 学完", "提前 8 天", ChapterEstimateTone.GOOD),
-            estimate(done = 5, first = "2026-11-09"))
         assertEquals(ChapterEstimateInfo("预计 2026-12-20 学完", "推迟 30 天", ChapterEstimateTone.BAD),
             estimate(done = 2, first = "2026-11-01"))
         assertEquals(ChapterEstimateInfo("预计 2026-11-20 学完", "按计划", ChapterEstimateTone.GOOD),
             estimate(done = 5, first = "2026-11-01"))
-        assertEquals(ChapterEstimateInfo("预计 2026-11-19 学完", "提前 1 天", ChapterEstimateTone.GOOD),
-            estimate(done = 1, first = "2026-11-10"))
-        assertEquals(estimate(done = 1, first = "2026-11-10"), estimate(done = 1, first = "2026-11-11"))
+        assertEquals(ChapterEstimateInfo("预计 2026-11-15 学完", "提前 5 天", ChapterEstimateTone.GOOD),
+            estimate(done = 6, first = "2026-11-04"))
     }
 
     @Test fun completionUsesRecordedDateAndNeverInventsAnOldOne() {
@@ -56,8 +56,14 @@ class ChapterEstimateTest {
         assertFalse(state.obj("ce").has("phys"))
         toggleChapter(state, subject, 0, "2026-11-12")
         assertFalse(state.obj("cf").has("phys"))
+        assertFalse(state.obj("ch").has("phys"))
         toggleChapter(state, subject, 1, "2026-11-13")
         assertEquals("2026-11-13", state.obj("cf").getString("phys"))
+        toggleChapter(state, subject, 0, "2026-11-15")
+        toggleChapter(state, subject, 1, "2026-11-16")
+        assertEquals("2026-11-15", state.obj("cf").getString("phys"))
+        setChapterCompletedDate(state, "phys", "2026-11-18")
+        assertEquals("2026-11-18", state.obj("ce").getString("phys"))
         state.put("upd", 1)
         roundTrip.put("upd", 2)
         val merged = CheckinCore.mergeState(state, roundTrip)

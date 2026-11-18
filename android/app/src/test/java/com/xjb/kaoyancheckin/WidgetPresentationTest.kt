@@ -11,7 +11,8 @@ class WidgetPresentationTest {
         assertEquals(WidgetLayout(false, true, 1, 1), widgetLayout(300, 100, 2))
         assertEquals(WidgetLayout(true, false, 1, 1), widgetLayout(180, 80, 2))
         assertEquals(WidgetLayout(false, true, 2, 3), widgetLayout(340, 180, 1))
-        assertEquals(4, widgetLayout(340, 400, 1).maxRows)
+        assertEquals(WidgetLayout(false, true, 2, 3), widgetLayout(340, 180, 2))
+        assertEquals(7, widgetLayout(340, 400, 1).maxRows)
     }
 
     @Test fun statusShowsAchievementAndBoundsProgress() {

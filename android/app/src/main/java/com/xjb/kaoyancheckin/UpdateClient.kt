@@ -27,7 +27,7 @@ internal class UpdateClient(
         val conn = openConnection(url)
         conn.connectTimeout = 20_000
         conn.readTimeout = readTimeout
-        conn.setRequestProperty("User-Agent", "KaoyanCheckin-Android/0.4")
+        conn.setRequestProperty("User-Agent", "KaoyanCheckin-Android/${BuildConfig.VERSION_NAME}")
         conn.setRequestProperty("Accept", "application/vnd.github+json, application/json, application/octet-stream")
         conn.instanceFollowRedirects = true
         return conn

@@ -225,10 +225,11 @@ class ProgressForecastTest {
 
         assertEquals(date("2028-02-23"), forecast.estimatedDate)
         assertEquals(-60L, forecast.examMarginDays)
-        assertEquals(110, forecast.requiredDaily)
-        assertFalse(forecast.requiredDailyForExam)
+        assertEquals(29, forecast.requiredDaily)
+        assertTrue(forecast.requiredDailyForExam)
         val text = formatWordsForecast(forecast)
-        assertTrue(text.contains("日均需 110 个"))
+        assertTrue(text.contains("2028年2月23日"))
+        assertTrue(text.contains("日均需 29 个"))
         assertTrue(text.contains("初试前完不成"))
         assertTrue(text.contains("晚于初试 60 天"))
     }
@@ -376,7 +377,7 @@ class ProgressForecastTest {
         ) as SubjectForecast.Estimated
         assertEquals(date("2027-01-09"), late.estimatedDate)
         assertEquals(39L, late.planDeltaDays)
-        assertTrue(formatSubjectForecast(late).contains("预计 1月9日 学完"))
+        assertTrue(formatSubjectForecast(late).contains("预计 2027年1月9日 学完"))
 
         val overdue = forecastSubject(
             subject(),
@@ -414,7 +415,7 @@ class ProgressForecastTest {
     }
 
     @Test
-    fun subjectForecastFallsBackToAverageWhenRecentWindowIsEmpty() {
+    fun subjectForecastIsStalledWhenRecentWindowIsEmpty() {
         val forecast = forecastSubject(
             subject(),
             subjectState(
@@ -427,11 +428,11 @@ class ProgressForecastTest {
                 ),
             ),
             date("2026-12-20"),
-        ) as SubjectForecast.Estimated
+        )
 
-        assertEquals(SubjectPace.AVERAGE, forecast.pace)
-        assertEquals(date("2027-04-16"), forecast.estimatedDate)
-        assertFalse(formatSubjectForecast(forecast).contains("按近 28 天速度"))
+        assertTrue(forecast is SubjectForecast.Stalled)
+        assertEquals(ForecastTone.BAD, forecast.tone)
+        assertTrue(formatSubjectForecast(forecast).contains("近28天无新增"))
     }
 
     @Test
@@ -547,5 +548,46 @@ class ProgressForecastTest {
         assertEquals("平均", subject.method)
         assertTrue(items.any { it.text == "单词 · 预计 11月24日 过完第一轮" })
         assertTrue(items.any { it.text == "日均学习 2.0h" && it.status == "达成率 133%" })
+    }
+
+    @Test
+    fun stalledWordsAndHoursWithPriorHistoryStayBadInSummary() {
+        val state = combinedState(
+            words = mapOf("2026-11-01" to 100),
+            hours = mapOf("2026-11-02" to 2.0),
+            done = 0,
+            first = "2026-11-01",
+        )
+        val wordForecast = forecastWords(state, date("2026-11-25"), exam = exam)
+        val hoursForecast = forecastHours(state, testPlan(), date("2026-11-25"))
+        assertTrue(wordForecast is WordForecast.Stalled)
+        assertEquals(ForecastTone.BAD, wordForecast.tone)
+        assertTrue(hoursForecast is HoursForecast.Estimated)
+        assertEquals(ForecastTone.BAD, hoursForecast.tone)
+        val items = forecastSummaryItems(testPlan(), state, date("2026-11-25"))
+        assertTrue(items.any { it.text.startsWith("单词") && it.tone == ForecastTone.BAD })
+        assertTrue(items.any { it.text.startsWith("日均学习") && it.tone == ForecastTone.BAD })
+    }
+
+    @Test
+    fun earlyStartedAndOverdueSubjectsAreHandledConsistently() {
+        val early = forecastSubject(subject(start = "2026-11-20"), subjectState(done = 2, first = "2026-11-01"), date("2026-11-14"))
+        assertTrue(early is SubjectForecast.Estimated)
+
+        val overduePlan = testPlan(subject(end = "2026-11-10"))
+        val items = forecastSummaryItems(overduePlan, subjectState(done = 2, first = "2026-11-01"), date("2026-11-14"))
+        assertTrue(items.any { it.text.startsWith("生理") && it.tone == ForecastTone.BAD })
+    }
+
+    @Test
+    fun webArchiveWithUndatedChaptersKeepsMissingFirstDateAndCompletedFallsBackToChapterDates() {
+        val partialState = subjectState(done = 3, dates = mapOf(2 to "2026-11-14"))
+        val partialForecast = forecastSubject(subject(), partialState, date("2026-11-14"))
+        assertTrue(partialForecast is SubjectForecast.Insufficient)
+        assertEquals(SubjectForecastGap.MISSING_FIRST_DATE, (partialForecast as SubjectForecast.Insufficient).reason)
+
+        val completedState = subjectState(done = 10, dates = mapOf(9 to "2027-01-12"))
+        val completedForecast = forecastSubject(subject(), completedState, date("2027-01-15")) as SubjectForecast.Completed
+        assertEquals(date("2027-01-12"), completedForecast.completedDate)
     }
 }

@@ -88,4 +88,20 @@ class UndoTaskTest {
         plan.deleteCustomTask(state.obj("days").obj(date), "c:练习")
         assertNull(undoTask(state, plan, "third", date, time + 4))
     }
+
+    @Test fun undoOnPreStartDateRemovesEmptyRecordAndRecurringUndoRespectsSkip() {
+        val state = CheckinCore.emptyState().put("recur", org.json.JSONArray().put("阅读"))
+        toggleTaskWithUndo(state, plan, "2026-10-01", "2026-11-10", "words", time, "pre")
+        assertTrue(state.obj("days").has("2026-10-01"))
+        assertNotNull(undoTask(state, plan, "pre", "2026-11-10", time + 1))
+        assertFalse(state.obj("days").has("2026-10-01"))
+
+        toggleTaskWithUndo(state, plan, date, date, "r:阅读", time + 2, "rec")
+        assertTrue(plan.isDone(state.obj("days").obj(date), "r:阅读"))
+        assertNotNull(undoTask(state, plan, "rec", date, time + 3))
+        assertFalse(plan.isDone(state.obj("days").obj(date), "r:阅读"))
+        toggleTaskWithUndo(state, plan, date, date, "r:阅读", time + 4, "rec2")
+        plan.deleteCustomTask(state.obj("days").obj(date), "r:阅读")
+        assertNull(undoTask(state, plan, "rec2", date, time + 5))
+    }
 }

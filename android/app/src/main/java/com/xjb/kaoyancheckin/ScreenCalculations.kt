@@ -4,7 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import org.json.JSONObject
 import java.time.LocalDate
-import kotlin.math.roundToInt
+import kotlin.math.floor
 
 internal data class PlannedSubject(
     val subject: JSONObject,
@@ -26,13 +26,10 @@ internal fun plannedSubjects(plan: StudyPlan, state: JSONObject, today: String):
         val expected = when {
             today < start -> 0
             today >= end -> total
-            else -> (daysBetween(start, today).toDouble() / daysBetween(start, end).coerceAtLeast(1) * total).roundToInt()
+            else -> floor(daysBetween(start, today).toDouble() / daysBetween(start, end).coerceAtLeast(1) * total).toInt()
         }
-        val key = subject.getString("k")
-        PlannedSubject(subject, done, total, expected, today < start && done == 0,
-            chapterEstimate(LocalDate.parse(today), LocalDate.parse(start), LocalDate.parse(end), done, total,
-                state.obj("cf").optString(key).takeIf(CheckinCore::validDate)?.let(LocalDate::parse),
-                state.obj("ce").optString(key).takeIf(CheckinCore::validDate)?.let(LocalDate::parse)))
+        val forecast = forecastSubject(subject, state, LocalDate.parse(today))
+        PlannedSubject(subject, done, total, expected, today < start && done == 0, chapterEstimate(forecast))
     }
 
 internal fun formatUnstartedSubjects(subjects: List<PlannedSubject>): String? =
@@ -92,7 +89,7 @@ internal fun statsCalculations(plan: StudyPlan, state: JSONObject, today: String
     val history = dates.filter { it < plan.start }.sorted()
     val heatmap = if (today < plan.start && history.isEmpty()) emptyList() else {
         val start = StudyPlan.monday(history.firstOrNull() ?: plan.start)
-        val count = (daysBetween(start, currentWeek) / 7 + 1).toInt().coerceIn(1, 90)
+        val count = (daysBetween(start, currentWeek) / 7 + 1).toInt().coerceAtLeast(1)
         (0 until count).map { index ->
             val monday = StudyPlan.addDays(start, 7L * index)
             HeatmapWeek(monday, (0..6).map { offset ->
