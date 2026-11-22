@@ -190,6 +190,7 @@ object CheckinCore {
         }
         if (settings.has("wordBase") && !integerIn(settings.opt("wordBase"), 0, 20000)) fail("单词基数须为 0–20000 的整数")
         if (settings.has("wordGoal") && !integerIn(settings.opt("wordGoal"), 1, 50000)) fail("单词目标须为 1–50000 的整数")
+        if (settings.has(SUBJECT_SCHEDULE) && !validSubjectSchedule(settings.opt(SUBJECT_SCHEDULE))) fail("学习计划格式错误")
         if (raw.hasValue("_recovery") && !text(raw.opt("_recovery"))) fail("恢复副本格式错误")
         if (!number(nullish(raw.opt("upd"), 0)) || !number(nullish(raw.opt("bk"), 0))) fail("备份时间格式错误")
         val days = JSONObject()
@@ -238,6 +239,7 @@ object CheckinCore {
             .put("upd", fallback(raw.opt("upd"), 0)).put("bk", fallback(raw.opt("bk"), 0))
             .put("tip", if (truthy(raw.opt("tip"))) 1 else 0)
         if (normalizedRecurFrom.length() > 0) result.put("recurFrom", normalizedRecurFrom)
+        settings.optJSONObject(SUBJECT_SCHEDULE)?.let { result.obj("settings").put(SUBJECT_SCHEDULE, it.copyJson()) }
         if (truthy(raw.opt("_recovery"))) result.put("_recovery", raw.get("_recovery"))
         // Short-lived local undo metadata is never part of an exported backup.
         raw.optJSONObject("_undo")?.let { if (UndoStep.fromJson(it) != null) result.put("_undo", it.copyJson()) }
@@ -284,7 +286,8 @@ object CheckinCore {
         } || state.obj("cf").length() > 0 || state.obj("ce").length() > 0 || state.obj("cd").length() > 0
         if (hasChapterData) return true
         val settings = state.optJSONObject("settings") ?: return false
-        return (settings.hasValue("exam") && settings.optString("exam", "2027-12-25") != "2027-12-25") ||
+        return settings.has(SUBJECT_SCHEDULE) ||
+            (settings.hasValue("exam") && settings.optString("exam", "2027-12-25") != "2027-12-25") ||
             (settings.hasValue("backupDays") && settings.optInt("backupDays", 7) != 7) ||
             (settings.hasValue("wordBase") && settings.optInt("wordBase", DEFAULT_WORD_BASE) != DEFAULT_WORD_BASE) ||
             (settings.hasValue("wordGoal") && settings.optInt("wordGoal", DEFAULT_WORD_GOAL) != DEFAULT_WORD_GOAL)

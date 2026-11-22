@@ -26,6 +26,66 @@ class StudyPlanTest {
         assertEquals("旧计划 · 生理启动", plan.phase("2026-10-01", state).getString("name"))
     }
 
+    @Test fun completingPhysiologyAndStartingMedicineEarlyUsesPersonalDatesWithoutInventingChapterDates() {
+        val state = CheckinCore.emptyState()
+        val today = "2026-11-22"
+        val physiology = plan.subjects.first { it.getString("k") == "phys" }
+        val firstChecked = "2026-11-06"
+        toggleChapter(state, physiology, 0, firstChecked)
+
+        completeFirstRound(state, physiology)
+        plan.selectFocus(state, "med", today)
+        val progress = plannedSubjects(plan, state, today).associateBy { it.subject.getString("k") }
+        assertEquals(12, progress.getValue("phys").done)
+        assertEquals(firstChecked, state.obj("cf").getString("phys"))
+        assertEquals(setOf("0"), state.obj("cd").obj("phys").namesList().toSet())
+        assertFalse(state.obj("ce").has("phys"))
+        val medicine = progress.getValue("med")
+        assertEquals(today, medicine.subject.getString("s"))
+        assertEquals("2027-02-27", medicine.subject.getString("e"))
+        assertFalse(medicine.upcoming)
+        assertEquals("2027-01-18", progress.getValue("bioc").subject.getString("s"))
+        assertEquals("主攻 · 内科", plan.phase(today, state).getString("name"))
+        assertEquals("内科 · 0/9 章", forecastSummaryItems(plan, state, java.time.LocalDate.parse(today)).first().text)
+
+        setSubjectWindow(state, "med", today, "2026-12-20")
+        val restored = CheckinCore.parseBackupDocument(CheckinCore.backupJSON(state))
+        assertEquals("med", plan.focusSubject(today, restored)?.getString("k"))
+        assertEquals("2026-12-20", plannedSubjects(plan, restored, today)
+            .first { it.subject.getString("k") == "med" }.subject.getString("e"))
+        val mergedWithOlderFormat = CheckinCore.importBackup(restored, """{"days":{},"upd":50}""")
+        assertEquals("med", plan.focusSubject(today, mergedWithOlderFormat)?.getString("k"))
+    }
+
+    @Test fun switchingAndReturningToCalendarKeepEarlierSubjectsAndSameDayCompletedTasks() {
+        val state = CheckinCore.emptyState()
+        val yesterday = "2026-11-21"
+        val today = "2026-11-22"
+        val tomorrow = "2026-11-23"
+        state.obj("days").put(yesterday, dayWith("phy"))
+        state.obj("days").put(today, dayWith("phy", "words", "drill"))
+
+        plan.selectFocus(state, "med", today)
+        assertEquals(listOf("words", "drill", "phy", "sent"), plan.tasks(yesterday, state, today).map { it.id })
+        assertEquals(listOf("words", "drill", "med", "sent", "phy"), plan.tasks(today, state, today).map { it.id })
+        val widget = widgetSnapshot(plan, state, today)
+        assertEquals(3, widget.totalDone)
+        assertEquals(5, widget.totalTasks)
+        assertEquals(listOf("words", "drill"), widget.tasks.filter { it.minimum }.map { it.id })
+        assertTrue(widget.satisfied)
+
+        state.obj("days").put(tomorrow, dayWith("med"))
+        plan.selectFocus(state, null, tomorrow)
+        assertTrue(plan.tasks(tomorrow, state, tomorrow).any { it.id == "med" })
+        assertEquals("med", plan.focusSubject(today, state)?.getString("k"))
+        assertNull(plan.focusSubject(tomorrow, state))
+        assertFalse(plan.tasks("2026-11-24", state, "2026-11-24").any { it.id == "med" })
+    }
+
+    private fun dayWith(vararg checked: String): JSONObject = StudyPlan.day().apply {
+        checked.forEach { obj("t").put(it, true) }
+    }
+
     @Test fun phaseBoundariesAndPoliticsStartRespectWebDates() {
         val state = CheckinCore.emptyState()
         listOf(
