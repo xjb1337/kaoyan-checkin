@@ -585,7 +585,9 @@ internal fun forecastSummaryItems(plan: StudyPlan, state: JSONObject, today: Loc
     val phase = plan.phase(today.toString(), state)
     val phaseStart = parseDate(phase.optString("s"))
     val phaseEnd = parseDate(phase.optString("e"))
-    val currentSubjects = plan.subjects.filter { subject ->
+    val focusKey = plan.focusSubject(today.toString(), state)?.getString("k")
+    val currentSubjects = plan.subjects.map { plan.subjectWindow(it, state) }.filter { subject ->
+        if (focusKey != null) return@filter subject.getString("k") == focusKey
         val start = parseDate(subject.optString("s")) ?: return@filter false
         val end = parseDate(subject.optString("e")) ?: return@filter false
         val total = subject.arr("ch").length()
@@ -620,11 +622,12 @@ internal fun forecastSummaryItems(plan: StudyPlan, state: JSONObject, today: Loc
                 status = "已完成",
                 tone = ForecastTone.GOOD,
             ))
-            is SubjectForecast.Insufficient -> if (end != null && today.isAfter(end) && forecast.done < forecast.total) {
-                items.add(ForecastSummaryItem(
+            is SubjectForecast.Insufficient -> {
+                val overdue = end != null && today.isAfter(end) && forecast.done < forecast.total
+                if (overdue || focusKey != null) items.add(ForecastSummaryItem(
                     text = "${forecast.subjectName} · ${forecast.done}/${forecast.total} 章",
-                    status = "已逾期",
-                    tone = ForecastTone.BAD,
+                    status = if (overdue) "已逾期" else "主攻中",
+                    tone = if (overdue) ForecastTone.BAD else ForecastTone.NEUTRAL,
                 ))
             }
             else -> Unit

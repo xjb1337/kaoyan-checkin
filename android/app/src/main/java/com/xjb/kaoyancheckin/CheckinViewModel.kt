@@ -338,6 +338,13 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    internal fun selectStudyFocus(key: String?) {
+        val current = currentDay()
+        change(if (key == null) "已切回原计划" else "已切换主攻科目") {
+            it.apply { plan.selectFocus(this, key, current) }
+        }
+    }
+
     fun retireTask(name: String) = edit { current ->
         StudyPlan.retireRecurringTask(current, name)
     }

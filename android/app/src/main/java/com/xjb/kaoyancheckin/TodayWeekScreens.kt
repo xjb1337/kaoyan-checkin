@@ -302,7 +302,10 @@ internal fun TodayScreen(model: CheckinViewModel) {
             Text("阶段计划", Modifier.weight(1f), fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = webColors.text)
             Text(if (stageExpanded) "▾" else "▸", color = webColors.sub, fontSize = 14.sp)
         }
-        if (stageExpanded) {
+        if (stageExpanded && model.plan.focusSubject(date, state) != null) {
+            Text(phase.getString("name"), fontWeight = FontWeight.Bold, color = webColors.text)
+            Tip("日目标 ${hours(phase.optDouble("gh", 1.5))}h")
+        } else if (stageExpanded) {
             val shownPhase = if (date < model.plan.start && (date >= model.today || state.obj("days").optJSONObject(date) == null))
                 model.plan.data.arr("PHASES").getJSONObject(0) else phase
             val start = shownPhase.getString("s")

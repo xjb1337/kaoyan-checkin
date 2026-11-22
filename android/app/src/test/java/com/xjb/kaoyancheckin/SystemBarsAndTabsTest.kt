@@ -104,6 +104,9 @@ class SystemBarsAndTabsTest {
                 compose.onNodeWithText("今日").performClick()
                 compose.onNodeWithText("计划").performClick()
                 compose.onNodeWithText("阶段节点").assertIsSelected()
+                compose.onNodeWithText("复盘").performClick()
+                compose.onNodeWithText("调整学习计划").performClick()
+                compose.onNodeWithText("学习计划").assertIsSelected()
 
                 val date = "2026-11-10"
                 compose.runOnIdle {

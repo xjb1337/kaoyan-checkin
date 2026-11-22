@@ -214,12 +214,19 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
                     when (model.page) {
                         0 -> TodayScreen(model)
                         1 -> {
-                            SegmentedBar(listOf("本周目标", "阶段节点"), planSubPage) { planSubPage = it }
-                            if (planSubPage == 0) WeekScreen(model) else MilestonesScreen(model)
+                            SegmentedBar(listOf("本周目标", "阶段节点", "学习计划"), planSubPage) { planSubPage = it }
+                            when (planSubPage) {
+                                0 -> WeekScreen(model)
+                                1 -> MilestonesScreen(model)
+                                else -> SubjectPlanScreen(model)
+                            }
                         }
                         2 -> {
                             SegmentedBar(listOf("进度预测", "统计趋势"), reviewSubPage) { reviewSubPage = it }
-                            if (reviewSubPage == 0) ProgressScreen(model) else StatsScreen(model)
+                            if (reviewSubPage == 0) ProgressScreen(model) {
+                                planSubPage = 2
+                                model.page = 1
+                            } else StatsScreen(model)
                         }
                         else -> SettingsScreen(model, updates, appearance)
                     }

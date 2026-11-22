@@ -11,8 +11,8 @@ android {
         applicationId = "com.xjb.kaoyancheckin"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.2.2"
+        versionCode = 12
+        versionName = "1.3.0"
     }
     // CI supplies all four values; release builds without them stay unsigned rather than falling back to debug.
     val signingValues = listOf("SIGNING_STORE_FILE", "SIGNING_STORE_PASSWORD", "SIGNING_KEY_ALIAS", "SIGNING_KEY_PASSWORD")

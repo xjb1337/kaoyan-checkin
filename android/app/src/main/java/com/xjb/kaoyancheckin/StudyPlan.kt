@@ -3,6 +3,7 @@ package com.xjb.kaoyancheckin
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.LocalDate
+import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 import java.time.DayOfWeek
 
@@ -13,9 +14,21 @@ class StudyPlan(val data: JSONObject) {
     val historyStart: String = data.getString("HISTORY_START")
     val subjects: List<JSONObject> = data.arr("SUBJ").values().map { it as JSONObject }
     val milestones: List<JSONArray> = data.arr("MILES").values().map { it as JSONArray }
+    private val focusSubjects = subjects.filter { it.has("taskId") }.associateBy { it.getString("taskId") }
 
     fun exam(state: JSONObject): String = state.obj("settings").optString("exam", "2027-12-25")
     fun phase(date: String, state: JSONObject): JSONObject {
+        val phase = calendarPhase(date, state)
+        val focus = focusSubject(date, state) ?: return phase
+        val task = focusTask(focus)
+        val tasks = phase.arr("tasks").values().filterIsInstance<JSONObject>()
+        val originalIndex = tasks.indexOfFirst { it.getString("id") in focusSubjects }
+        val updated = tasks.filterNot { it.getString("id") in focusSubjects }.toMutableList()
+        updated.add(if (originalIndex < 0) updated.size else originalIndex, task)
+        return phase.put("tasks", JSONArray(updated)).put("name", "主攻 · ${focus.getString("name")}")
+    }
+
+    private fun calendarPhase(date: String, state: JSONObject): JSONObject {
         val exam = exam(state)
         if (date < start) return data.obj("LEGACY_PHASE").copyJson()
         if (date >= exam) return data.obj("PH5").copyJson().put("s", exam).put("e", "2028-08-31")
@@ -23,6 +36,38 @@ class StudyPlan(val data: JSONObject) {
         if (date >= "2027-12-01" && date < exam) return data.obj("PH4").copyJson().put("s", "2027-12-01").put("e", addDays(exam, -1))
         return data.arr("PHASES").getJSONObject(0).copyJson()
     }
+
+    internal fun subjectWindow(subject: JSONObject, state: JSONObject): JSONObject {
+        val window = subjectSchedule(state).obj("windows").optJSONObject(subject.getString("k")) ?: return subject
+        return subject.copyJson().put("s", window.getString("s")).put("e", window.getString("e"))
+    }
+
+    internal fun focusSubject(date: String, state: JSONObject): JSONObject? {
+        if (date < start || date >= exam(state)) return null
+        val key = subjectFocusEntry(state, date) ?: return null
+        return subjects.firstOrNull { it.has("taskId") && it.getString("k") == key }
+    }
+
+    internal fun selectFocus(state: JSONObject, key: String?, today: String) {
+        require(today >= start && today < exam(state)) { "当前日期不在初试学习计划内" }
+        if (key != null) {
+            val subject = subjects.firstOrNull { it.has("taskId") && it.getString("k") == key } ?: error("科目不存在")
+            require(chapterDone(subject, state) < subject.arr("ch").length()) { "这科第一轮已完成" }
+            val window = subjectWindow(subject, state)
+            val initialStart = LocalDate.parse(window.getString("s"))
+            val current = LocalDate.parse(today)
+            if (current < initialStart) {
+                val initialEnd = LocalDate.parse(window.getString("e"))
+                val shiftedEnd = initialEnd.minusDays(ChronoUnit.DAYS.between(current, initialStart))
+                setSubjectWindow(state, key, today, shiftedEnd.toString())
+            }
+        }
+        setSubjectFocus(state, key, today)
+    }
+
+    private fun focusTask(subject: JSONObject): JSONObject = JSONObject()
+        .put("id", subject.getString("taskId")).put("tag", "西综")
+        .put("label", "${subject.getString("name")} · 教材/提纲 + 章节真题")
 
     // Web ch is keyed by subject and zero-based chapter index, not by chapter name.
     fun chapterDone(subject: JSONObject, state: JSONObject): Int {
@@ -40,6 +85,16 @@ class StudyPlan(val data: JSONObject) {
         val tasks = if (beforePlan) mutableListOf() else phase(date, state).arr("tasks").values().map { it as JSONObject }
             .filter { !it.has("from") || date >= it.getString("from") }
             .map { StudyTask(it.getString("id"), it.getString("label"), it.getString("tag")) }.toMutableList()
+        // A switch during the day keeps already checked subject tasks visible under their own IDs.
+        if (!beforePlan && record != null && date >= start && date < exam(state) && subjectFocusEntry(state, date) != null) {
+            val shownIds = tasks.map { it.id }.toSet()
+            focusSubjects.forEach { (id, subject) ->
+                if (id !in shownIds && isDone(record, id)) {
+                    val task = focusTask(subject)
+                    tasks.add(StudyTask(id, task.getString("label"), task.getString("tag")))
+                }
+            }
+        }
         val skipped = record?.arr("sk")?.values()?.filterIsInstance<String>()?.toSet() ?: emptySet()
         val recurFrom = state.optJSONObject("recurFrom")
         val recurring = state.arr("recur").values().filterIsInstance<String>()

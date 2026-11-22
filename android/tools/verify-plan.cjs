@@ -70,11 +70,17 @@ assert.equal(typeof plan.PH5.fs, 'number', 'PH5.fs 必须是数字');
 
 assert.ok(Array.isArray(plan.SUBJ), 'SUBJ 必须是数组');
 assert.ok(plan.SUBJ.length > 0, 'SUBJ 不能为空');
+const subjectTaskIds = new Set();
 plan.SUBJ.forEach((subject, index) => {
   const label = `SUBJ[${index}]`;
   assert.ok(isObject(subject), `${label} 必须是对象`);
   checkText(subject.k, `${label}.k`);
   checkText(subject.name, `${label}.name`);
+  checkText(subject.taskId, `${label}.taskId`);
+  assert.ok(!subjectTaskIds.has(subject.taskId), `${label}.taskId 重复`);
+  const matchingTasks = plan.PHASES.flatMap(phase => phase.tasks).filter(task => task.id === subject.taskId);
+  assert.ok(matchingTasks.length > 0 && matchingTasks.every(task => task.min !== 1), `${label}.taskId 须对应非最低线任务`);
+  subjectTaskIds.add(subject.taskId);
   checkDate(subject.s, `${label}.s`);
   checkDate(subject.e, `${label}.e`);
   assert.ok(Array.isArray(subject.ch), `${label}.ch 必须是数组`);

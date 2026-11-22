@@ -59,7 +59,7 @@ import kotlin.math.roundToInt
 // Web vProg: plan-vs-actual bars, expandable .mi chapter list, and score card.
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun ProgressScreen(model: CheckinViewModel) {
+internal fun ProgressScreen(model: CheckinViewModel, openStudyPlan: () -> Unit) {
     val c = webColors
     val context = LocalContext.current
     val enabled = model.loadError.isEmpty()
@@ -78,6 +78,7 @@ internal fun ProgressScreen(model: CheckinViewModel) {
         expandedSubjectKey = first?.subject?.getString("k")
         scope.launch { chapterRequester.bringIntoView() }
     }
+    WebButton("调整学习计划", openStudyPlan, Modifier.fillMaxWidth(), enabled = enabled)
     Section("学习进度预测") {
         ForecastRow(
             formatWordsForecast(wordForecast), wordForecast.tone, wordForecastStatus(wordForecast),
@@ -87,7 +88,7 @@ internal fun ProgressScreen(model: CheckinViewModel) {
             val missingFirst = forecast is SubjectForecast.Insufficient && forecast.reason == SubjectForecastGap.MISSING_FIRST_DATE
             val missingCompleted = forecast is SubjectForecast.Completed && forecast.completedDate == null
             val subject = if (missingFirst || missingCompleted) {
-                model.plan.subjects.firstOrNull { it.getString("name") == forecast.subjectName }
+                calculations.planned.firstOrNull { it.subject.getString("name") == forecast.subjectName }?.subject
             } else null
             ForecastRow(
                 formatSubjectForecast(forecast), subjectForecastTone(forecast), subjectForecastStatus(forecast),
@@ -403,19 +404,21 @@ private fun ForecastRow(
     }
 }
 
-private fun showDatePicker(context: Context, defaultDate: String, maxDate: String, onPicked: (String) -> Unit) {
-    val limit = LocalDate.parse(maxDate)
-    val parsed = runCatching { LocalDate.parse(defaultDate) }.getOrNull() ?: limit
-    val initial = if (parsed > limit) limit else parsed
+internal fun showDatePicker(context: Context, defaultDate: String, maxDate: String? = null, onPicked: (String) -> Unit) {
+    val limit = maxDate?.let(LocalDate::parse)
+    val parsed = runCatching { LocalDate.parse(defaultDate) }.getOrNull() ?: limit ?: LocalDate.parse(CheckinCore.today())
+    val initial = if (limit != null && parsed > limit) limit else parsed
     val dialog = DatePickerDialog(context, { _, year, month, day ->
         val picked = LocalDate.of(year, month + 1, day)
-        if (picked <= limit) onPicked(picked.toString())
+        if (limit == null || picked <= limit) onPicked(picked.toString())
     }, initial.year, initial.monthValue - 1, initial.dayOfMonth)
-    val maximum = Calendar.getInstance().apply {
-        clear()
-        set(limit.year, limit.monthValue - 1, limit.dayOfMonth)
+    if (limit != null) {
+        val maximum = Calendar.getInstance().apply {
+            clear()
+            set(limit.year, limit.monthValue - 1, limit.dayOfMonth)
+        }
+        dialog.datePicker.maxDate = maximum.timeInMillis
     }
-    dialog.datePicker.maxDate = maximum.timeInMillis
     dialog.show()
 }
 

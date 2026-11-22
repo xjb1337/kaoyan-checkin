@@ -18,7 +18,8 @@ internal data class PlannedSubject(
 }
 
 internal fun plannedSubjects(plan: StudyPlan, state: JSONObject, today: String): List<PlannedSubject> =
-    plan.subjects.map { subject ->
+    plan.subjects.map { base ->
+        val subject = plan.subjectWindow(base, state)
         val start = subject.getString("s")
         val end = subject.getString("e")
         val total = subject.arr("ch").length()
@@ -52,7 +53,7 @@ internal fun rememberProgressCalculations(plan: StudyPlan, state: JSONObject, to
     remember(plan, state, today) {
         val date = LocalDate.parse(today)
         ProgressCalculations(wordProgress(state, today), forecastWords(state, date, exam = LocalDate.parse(plan.exam(state))),
-            plan.subjects.map { forecastSubject(it, state, date) }, forecastHours(state, plan, date),
+            plan.subjects.map { forecastSubject(plan.subjectWindow(it, state), state, date) }, forecastHours(state, plan, date),
             plannedSubjects(plan, state, today), state.arr("scores").values().filterIsInstance<JSONObject>().sortedBy { it.getString("d") })
     }
 
