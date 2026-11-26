@@ -8,6 +8,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -48,10 +49,10 @@ class SystemBarsAndTabsTest {
         try { database.close() } finally { UpdateServices.backendOverride = null }
     }
 
-    @Test @Config(qualifiers = "notnight")
+    @Test @Config(qualifiers = "w360dp-h640dp-notnight")
     fun lightSystemBarsAndVectorTabsFollowEveryPalette() = verify(false)
 
-    @Test @Config(qualifiers = "night")
+    @Test @Config(qualifiers = "w960dp-h600dp-land-night")
     fun darkSystemBarsAndVectorTabsFollowEveryPalette() = verify(true)
 
     private fun verify(dark: Boolean) {
@@ -68,6 +69,7 @@ class SystemBarsAndTabsTest {
             }
             compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)).assertCountEquals(4)
             compose.onNodeWithText("今日").assertIsSelected()
+            compose.onNodeWithText(model.today).assertIsDisplayed()
             compose.onNodeWithText("计划").performClick().assertIsSelected()
             AppTheme.entries.forEach { theme ->
                 compose.runOnIdle { appearance.select(theme) }
@@ -102,13 +104,24 @@ class SystemBarsAndTabsTest {
                 compose.onNodeWithText("计划").performClick()
                 compose.onNodeWithText("阶段节点").performClick().assertIsSelected()
                 compose.onNodeWithText("今日").performClick()
+                val date = "2026-11-10"
+                compose.onNodeWithText(date).assertIsDisplayed()
+                compose.runOnIdle { model.updateDraft(DraftField.Words(date, "n"), "12") }
+                compose.onNodeWithText("调整计划").performClick()
+                compose.onNodeWithText("计划").assertIsSelected()
+                compose.onNodeWithText("学习计划").assertIsSelected()
+                compose.waitUntil(timeoutMillis = 15_000) {
+                    shadowOf(Looper.getMainLooper()).idle()
+                    model.state.obj("days").optJSONObject(date)?.obj("w")?.optInt("n") == 12
+                }
+                compose.onNodeWithText("阶段节点").performClick()
+                compose.onNodeWithText("今日").performClick()
                 compose.onNodeWithText("计划").performClick()
                 compose.onNodeWithText("阶段节点").assertIsSelected()
                 compose.onNodeWithText("复盘").performClick()
                 compose.onNodeWithText("调整学习计划").performClick()
                 compose.onNodeWithText("学习计划").assertIsSelected()
 
-                val date = "2026-11-10"
                 compose.runOnIdle {
                     model.adjustWords(date, "n", 20)
                     model.adjustWords(date, "n", 2500)

@@ -1,6 +1,5 @@
 package com.xjb.kaoyancheckin
 
-import android.app.DatePickerDialog
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -246,12 +245,21 @@ internal fun AutoSaveField(model: CheckinViewModel, field: DraftField, label: St
 }
 
 @Composable
-internal fun AddField(placeholder: String, enabled: Boolean = true, button: String = "添加", draftKey: String = placeholder, add: (String) -> Unit) {
+internal fun AddField(
+    placeholder: String,
+    enabled: Boolean = true,
+    button: String = "添加",
+    draftKey: String = placeholder,
+    validate: (String) -> String? = { null },
+    add: (String) -> Unit,
+) {
     var draft by rememberSaveable(draftKey) { mutableStateOf("") }
     val focus = LocalFocusManager.current
+    val trimmed = draft.trim()
+    val error = if (trimmed.isEmpty()) null else validate(trimmed)
+    val canAdd = enabled && trimmed.isNotEmpty() && error == null
     val submit = {
-        val trimmed = draft.trim()
-        if (enabled && trimmed.isNotEmpty()) {
+        if (canAdd) {
             add(trimmed)
             draft = ""
             focus.clearFocus()
@@ -259,8 +267,9 @@ internal fun AddField(placeholder: String, enabled: Boolean = true, button: Stri
     }
     Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         WebInput(draft, { draft = it }, placeholder, Modifier.weight(1f), enabled = enabled, onDone = submit)
-        WebButton(button, enabled = enabled && draft.isNotBlank(), onClick = submit)
+        WebButton(button, enabled = canAdd, onClick = submit)
     }
+    if (error != null) Text(error, Modifier.padding(top = 4.dp), color = webColors.red, style = MaterialTheme.typography.bodySmall)
 }
 
 // Web .daynav: date picker is native while keeping the web row's appearance.
@@ -270,40 +279,26 @@ internal fun DateNav(date: String, previous: () -> Unit, next: () -> Unit, curre
     status: String? = null, statusColor: Color? = null, statusBackground: Color? = null, onDate: (String) -> Unit = {}) {
     val context = LocalContext.current
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
-        WebButton("‹", previous, Modifier.width(44.dp), accessibilityLabel = if (datePicker) "上一天" else "上一周")
+        WebButton("‹", previous, Modifier.size(48.dp), accessibilityLabel = if (datePicker) "上一天" else "上一周")
         if (datePicker) {
-            val value = LocalDate.parse(date)
-            val limit = maxDate?.let { LocalDate.parse(it) }
-            val pickerDate = if (limit != null && value > limit) limit else value
-            Row(Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(10.dp))
+            Row(Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(10.dp))
                 .background(webColors.card).border(1.dp, webColors.line, RoundedCornerShape(10.dp))
-                .clickable {
-                    val dialog = DatePickerDialog(context, { _, year, month, day ->
-                        val picked = LocalDate.of(year, month + 1, day)
-                        if (limit == null || picked <= limit) onDate(picked.toString())
-                    }, pickerDate.year, pickerDate.monthValue - 1, pickerDate.dayOfMonth)
-                    if (limit != null) {
-                        val maximum = java.util.Calendar.getInstance().apply {
-                            clear()
-                            set(limit.year, limit.monthValue - 1, limit.dayOfMonth)
-                        }
-                        dialog.datePicker.maxDate = maximum.timeInMillis
-                    }
-                    dialog.show()
-                }.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${shortDate(date)}/${date.take(4)}", Modifier.weight(1f), textAlign = TextAlign.Center,
-                    color = webColors.text, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (status != null) Chip(status, statusColor ?: webColors.accent, statusBackground ?: webColors.chipBlue)
-                Spacer(Modifier.width(6.dp))
+                .clickable(role = Role.Button, onClickLabel = "选择日期") { showDatePicker(context, date, maxDate, onDate) }
+                .padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(date, textAlign = TextAlign.Center, color = webColors.text, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    if (status != null) Chip(status, statusColor ?: webColors.accent, statusBackground ?: webColors.chipBlue)
+                }
+                Spacer(Modifier.width(4.dp))
                 CalendarIcon()
             }
         } else {
             Text("${shortDate(date)} ~ ${shortDate(StudyPlan.addDays(date, 6))}", Modifier.weight(1f),
                 textAlign = TextAlign.Center, color = webColors.text, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        WebButton("›", { if (canGoNext) next() }, Modifier.width(44.dp), enabled = canGoNext,
+        WebButton("›", next, Modifier.size(48.dp), enabled = canGoNext,
             accessibilityLabel = if (datePicker) "下一天" else "下一周")
-        WebButton(currentLabel, current, enabled = !isCurrent, primary = !isCurrent)
+        WebButton(currentLabel, current, Modifier.heightIn(min = 48.dp), enabled = !isCurrent, primary = !isCurrent)
     }
 }
 

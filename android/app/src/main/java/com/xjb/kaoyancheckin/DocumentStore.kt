@@ -15,7 +15,7 @@ internal class DocumentStore(
     private val writeRaw: suspend (String) -> Unit,
     private val now: () -> Long = System::currentTimeMillis,
     private val readRecovery: (suspend () -> String?)? = null,
-    private val writeRecovery: (suspend (String?) -> Unit)? = null,
+    private val writeWithRecovery: (suspend (String, String?) -> Unit)? = null,
 ) {
     private val mutex = Mutex()
     private val changed = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
@@ -50,14 +50,15 @@ internal class DocumentStore(
                 }
                 val result = change(current.copyJson()) ?: return@withContext null
                 val normalized = CheckinCore.normalizeState(result.put("upd", now()))
-                val nextRecovery = if (writeRecovery != null) {
+                val nextRecovery = if (writeWithRecovery != null) {
                     normalized.optString("_recovery", "").ifEmpty { null }.also { normalized.remove("_recovery") }
                 } else null
                 normalized.toString() to nextRecovery
             } ?: return@withLock false
-            writeRaw(payload.first)
-            if (writeRecovery != null && payload.second != storedRecovery) {
-                writeRecovery.invoke(payload.second)
+            if (writeWithRecovery != null && payload.second != storedRecovery) {
+                writeWithRecovery.invoke(payload.first, payload.second)
+            } else {
+                writeRaw(payload.first)
             }
             true
         }

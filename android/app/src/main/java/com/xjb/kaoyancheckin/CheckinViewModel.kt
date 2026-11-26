@@ -184,14 +184,25 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
         change { it.apply(block) }
     }
 
-    fun editDay(date: String? = null, block: (JSONObject) -> Unit) {
+    fun editDay(date: String? = null, block: (JSONObject) -> Unit) =
+        editDayWithState(date) { _, _, day -> block(day) }
+
+    private fun editDayWithState(date: String?, block: (JSONObject, String, JSONObject) -> Unit) {
         val previousToday = today
         val selectedWasToday = selected == previousToday
         val current = currentDay()
         val target = resolveWriteDate(date, previousToday, current, selected, selectedWasToday)
         val now = System.currentTimeMillis()
-        change { editDayRecord(it, target, current, now, block) }
+        change { state -> editDayRecord(state, target, current, now) { day -> block(state, target, day) } }
     }
+
+    internal fun addCustomTask(date: String, name: String) =
+        editDayWithState(date) { state, target, day ->
+            require(name !in plan.recurringTasksOn(state, target)) { "当天已有同名固定任务" }
+            val tasks = day.arr("c")
+            require(tasks.values().none { (it as JSONObject).optString("n") == name }) { "任务已存在" }
+            day.put("c", tasks.put(JSONObject().put("n", name).put("d", false)))
+        }
 
     fun toggleTask(date: String, id: String) {
         val previousToday = today
@@ -304,17 +315,13 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun restorePrevious() {
-        viewModelScope.launch {
-            val raw = runCatching { repository.readRecovery() }.getOrNull().orEmpty()
-                .ifEmpty { state.optString("_recovery", "") }
-                .ifEmpty { runCatching { JSONObject(recoveryRaw ?: "{}").optString("_recovery", "") }.getOrDefault("") }
-            if (raw.isEmpty()) {
-                notify("还没有导入前副本")
-                return@launch
+        val damagedDocument = recoveryRaw
+        change("已恢复上次导入前的记录", allowRecovery = true, noChange = "还没有导入前副本") { current ->
+            val raw = current.optString("_recovery", "").ifEmpty {
+                runCatching { JSONObject(damagedDocument ?: "{}").optString("_recovery", "") }.getOrDefault("")
             }
-            commitChange("已恢复上次导入前的记录", true) {
-                CheckinCore.importBackup(it, raw, "replace", recoveryRaw = recoveryRaw)
-            }
+            if (raw.isEmpty()) null
+            else CheckinCore.importBackup(current, raw, "replace", recoveryRaw = damagedDocument)
         }
     }
 
@@ -349,8 +356,14 @@ class CheckinViewModel(application: Application) : AndroidViewModel(application)
         StudyPlan.retireRecurringTask(current, name)
     }
 
+    internal fun addRecurringTask(name: String) {
+        val date = currentDay()
+        change { it.apply { StudyPlan.addRecurringTask(this, name, date) } }
+    }
+
     fun wipe() = change("已清空打卡数据，保留设置与固定任务") {
-        CheckinCore.emptyState().put("settings", it.get("settings")).put("recur", it.get("recur")).put("tip", 1)
+        CheckinCore.emptyState().put("settings", it.get("settings")).put("recur", it.get("recur"))
+            .put("recurFrom", it.optJSONObject("recurFrom")).put("tip", 1)
     }
 
     override fun onCleared() {

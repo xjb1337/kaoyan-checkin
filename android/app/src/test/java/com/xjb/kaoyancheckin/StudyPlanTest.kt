@@ -204,6 +204,7 @@ class StudyPlanTest {
 
         val past = StudyPlan.day().apply { arr("c").put(JSONObject().put("n", "旧固定").put("d", false)) }
         state.obj("days").put("2026-11-05", past)
+        StudyPlan.addRecurringTask(state, "旧固定", "2026-11-05")
         StudyPlan.retireRecurringTask(state, "旧固定")
         assertFalse(plan.tasks("2026-11-05", state, "2026-11-10").any { it.label == "旧固定" })
 
@@ -212,6 +213,26 @@ class StudyPlanTest {
         assertEquals("旧计划 · 生理启动", legacy.getString("name"))
         legacy.put("name", "mutated")
         assertEquals("旧计划 · 生理启动", plan.phase("2026-10-01", state).getString("name"))
+    }
+
+    @Test fun fixedTaskStartAndSkipDoNotHideEarlierOrSameDayTemporaryTasks() {
+        val name = "整理笔记"
+        val early = "2026-11-08"
+        val skipped = "2026-11-09"
+        val later = "2026-11-10"
+        val state = CheckinCore.emptyState()
+        val earlierTask = JSONObject().put("n", name).put("d", false)
+        val skippedTask = JSONObject().put("n", name).put("d", true)
+        state.obj("days").put(early, StudyPlan.day().put("c", JSONArray().put(earlierTask)))
+            .put(skipped, StudyPlan.day().put("sk", JSONArray().put(name)).put("c", JSONArray().put(skippedTask)))
+        StudyPlan.addRecurringTask(state, name, skipped)
+
+        assertEquals(listOf("c:$name"), plan.tasks(early, state, later).filter { it.label == name }.map { it.id })
+        assertEquals(listOf("c:$name"), plan.tasks(skipped, state, later).filter { it.label == name }.map { it.id })
+        assertEquals(listOf("r:$name"), plan.tasks(later, state, later).filter { it.label == name }.map { it.id })
+        StudyPlan.retireRecurringTask(state, name)
+        assertTrue(plan.tasks(early, state, later).any { it.id == "c:$name" })
+        assertTrue(plan.tasks(skipped, state, later).any { it.id == "c:$name" })
     }
 
     @Test fun copiesPreviousWeekGoalsAndResetsCompletion() {

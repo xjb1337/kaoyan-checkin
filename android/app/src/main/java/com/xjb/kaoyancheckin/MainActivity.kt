@@ -33,7 +33,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -171,6 +170,10 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
     val c = webColors
     var planSubPage by rememberSaveable { mutableIntStateOf(0) }
     var reviewSubPage by rememberSaveable { mutableIntStateOf(0) }
+    val openStudyPlan = {
+        planSubPage = 2
+        model.page = 1
+    }
     val hasData = remember(model.state) { CheckinCore.hasData(model.state) }
     Column(Modifier.fillMaxSize().background(c.bg).imePadding()
         .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))) {
@@ -212,7 +215,10 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
                         }
                     }
                     when (model.page) {
-                        0 -> TodayScreen(model)
+                        0 -> TodayScreen(model, openStudyPlan) {
+                            reviewSubPage = 0
+                            model.page = 2
+                        }
                         1 -> {
                             SegmentedBar(listOf("本周目标", "阶段节点", "学习计划"), planSubPage) { planSubPage = it }
                             when (planSubPage) {
@@ -223,10 +229,7 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
                         }
                         2 -> {
                             SegmentedBar(listOf("进度预测", "统计趋势"), reviewSubPage) { reviewSubPage = it }
-                            if (reviewSubPage == 0) ProgressScreen(model) {
-                                planSubPage = 2
-                                model.page = 1
-                            } else StatsScreen(model)
+                            if (reviewSubPage == 0) ProgressScreen(model, openStudyPlan) else StatsScreen(model)
                         }
                         else -> SettingsScreen(model, updates, appearance)
                     }
@@ -262,11 +265,6 @@ private fun CheckinApp(openTodaySignal: Int, model: CheckinViewModel, updates: U
 @Composable
 private fun Header(model: CheckinViewModel) {
     val c = webColors
-    val phase = remember(model.ready, model.today, model.state) {
-        if (!model.ready) ""
-        else if (model.today < model.plan.start) "${model.plan.start.substring(5, 7).toInt()}月${model.plan.start.substring(8).toInt()}日开始"
-        else model.plan.phase(model.today, model.state).getString("name")
-    }
     val remaining = remember(model.ready, model.today, model.state) {
         if (model.ready) daysBetween(model.today, model.plan.exam(model.state)) else 0
     }
@@ -277,19 +275,18 @@ private fun Header(model: CheckinViewModel) {
         .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(Modifier.widthIn(max = 540.dp).fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    if (examYear.isNotEmpty()) "考研打卡 · $examYear" else "考研打卡",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = c.text,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(phase, style = MaterialTheme.typography.bodySmall, color = c.sub, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                if (examYear.isNotEmpty()) "考研打卡 · $examYear" else "考研打卡",
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.titleLarge,
+                color = c.text,
+            )
+            if (model.ready) {
+                Text(if (remaining >= 0) "距初试 $remaining 天" else "初试已结束",
+                    Modifier.widthIn(max = 140.dp).background(c.blue, androidx.compose.foundation.shape.CircleShape)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                    color = androidx.compose.ui.graphics.Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
-            Text(if (remaining >= 0) "距初试 $remaining 天" else "初试已结束",
-                Modifier.background(c.blue, androidx.compose.foundation.shape.CircleShape).padding(horizontal = 10.dp, vertical = 4.dp),
-                color = androidx.compose.ui.graphics.Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         }
         Divider()
     }

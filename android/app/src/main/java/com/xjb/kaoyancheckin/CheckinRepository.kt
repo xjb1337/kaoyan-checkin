@@ -25,10 +25,13 @@ internal object CheckinRepository {
             readRaw = { access { readSafe(it, MAIN_DOCUMENT_ID) } },
             writeRaw = { json -> access { it.writeBlocking(CheckinDocument(MAIN_DOCUMENT_ID, json)) } },
             readRecovery = { access { readSafe(it, RECOVERY_DOCUMENT_ID) } },
-            writeRecovery = { recovery ->
-                access {
-                    if (recovery.isNullOrEmpty()) it.deleteByIdBlocking(RECOVERY_DOCUMENT_ID)
-                    else it.writeBlocking(CheckinDocument(RECOVERY_DOCUMENT_ID, recovery))
+            writeWithRecovery = { json, recovery ->
+                access { dao ->
+                    database.runInTransaction {
+                        dao.writeBlocking(CheckinDocument(MAIN_DOCUMENT_ID, json))
+                        if (recovery == null) dao.deleteByIdBlocking(RECOVERY_DOCUMENT_ID)
+                        else dao.writeBlocking(CheckinDocument(RECOVERY_DOCUMENT_ID, recovery))
+                    }
                 }
             },
         )

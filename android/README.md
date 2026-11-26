@@ -1,6 +1,6 @@
-# 考研打卡 Android · 1.3.0
+# 考研打卡 Android · 1.3.1
 
-Kotlin + Jetpack Compose / Material 3 原生应用。应用 ID：`com.xjb.kaoyancheckin`，最低 Android 8.0（API 26），编译/目标 API 35。当前源码的 `versionName` 为 1.3.0、`versionCode` 为 12。学习数据只保存在本机；检查更新和下载时会访问 GitHub。与旧版证书一致时可覆盖安装。
+Kotlin + Jetpack Compose / Material 3 原生应用。应用 ID：`com.xjb.kaoyancheckin`，最低 Android 8.0（API 26），编译/目标 API 35。当前源码的 `versionName` 为 1.3.1、`versionCode` 为 13。学习数据只保存在本机；检查更新和下载时会访问 GitHub。与旧版证书一致时可覆盖安装。
 
 `app/src/main/assets/plan.json` 提供默认备考路线和章节。个人计划在 App 的「计划 → 学习计划」调整，并随打卡数据保存在本机及 JSON 备份中。
 
