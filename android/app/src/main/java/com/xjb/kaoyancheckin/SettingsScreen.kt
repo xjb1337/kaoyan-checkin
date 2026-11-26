@@ -163,7 +163,8 @@ internal fun SettingsScreen(model: CheckinViewModel, updates: UpdateViewModel, a
         }
     }
     Section("固定每日任务（自定义）") {
-        model.state.arr("recur").values().forEach { item ->
+        val recurring = model.state.arr("recur").values()
+        recurring.forEach { item ->
             val name = item as String
             Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(name, Modifier.weight(1f), color = webColors.text)
@@ -171,9 +172,13 @@ internal fun SettingsScreen(model: CheckinViewModel, updates: UpdateViewModel, a
             }
             Divider()
         }
-        AddField("如：跟导师课题推进", enabled, "加入每天") { name -> model.edit {
-            StudyPlan.addRecurringTask(it, name, model.today)
-        } }
+        AddField("如：跟导师课题推进", enabled, "加入每天", validate = { name ->
+            when {
+                name in recurring -> "任务已存在"
+                name.length > 200 -> "任务名请控制在 200 字以内"
+                else -> null
+            }
+        }, add = model::addRecurringTask)
     }
     Section("补签卡", badge = "每月 2 张") {
         val left = model.plan.makeupLeft(model.today.take(7), model.state)

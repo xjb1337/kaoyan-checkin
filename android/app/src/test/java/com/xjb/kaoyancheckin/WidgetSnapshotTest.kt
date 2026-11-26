@@ -55,6 +55,19 @@ class WidgetSnapshotTest {
         assertTrue(snapshot.tasks.any { it.id == "fs1" })
     }
 
+    @Test fun aTemporaryTaskWithTheNameOfASkippedRecurringTaskStillCounts() {
+        val state = CheckinCore.emptyState()
+        StudyPlan.addRecurringTask(state, "阅读", date)
+        val day = StudyPlan.day().put("sk", JSONArray().put("阅读"))
+        day.arr("c").put(JSONObject().put("n", "阅读").put("d", true))
+        state.obj("days").put(date, day)
+
+        val snapshot = widgetSnapshot(plan, state, date)
+        assertEquals(plan.tasks(date, state, date).map { it.id }, snapshot.tasks.map { it.id })
+        assertTrue(snapshot.tasks.single { it.id == "c:阅读" }.done)
+        assertEquals("任务 1/5 · 最低线 0/2 · 未达标", widgetStatus(snapshot).summary)
+    }
+
     @Test fun documentStoreSerializesConcurrentAppAndWidgetEdits() = runBlocking {
         var disk: String? = null
         val store = DocumentStore(readRaw = { delay(5); disk }, writeRaw = { delay(5); disk = it }, now = { 42L })

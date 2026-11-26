@@ -95,19 +95,20 @@ class StudyPlan(val data: JSONObject) {
                 }
             }
         }
-        val skipped = record?.arr("sk")?.values()?.filterIsInstance<String>()?.toSet() ?: emptySet()
-        val recurFrom = state.optJSONObject("recurFrom")
-        val recurring = state.arr("recur").values().filterIsInstance<String>()
-        recurring.forEach { name ->
-            val from = recurFrom?.optString(name, "") ?: ""
-            if ((from.isEmpty() || date >= from) && name !in skipped) {
-                tasks.add(StudyTask("r:$name", name, "自定义"))
-            }
-        }
+        val recurring = recurringTasksOn(state, date)
+        recurring.forEach { name -> tasks.add(StudyTask("r:$name", name, "自定义")) }
         record?.arr("c")?.values()?.filterIsInstance<JSONObject>()
             ?.filter { it.optString("n").isNotEmpty() && it.getString("n") !in recurring }
             ?.forEach { tasks.add(StudyTask("c:${it.getString("n")}", it.getString("n"), "自定义")) }
         return tasks
+    }
+
+    internal fun recurringTasksOn(state: JSONObject, date: String): Set<String> {
+        val skipped = state.obj("days").optJSONObject(date)?.arr("sk")?.values()?.toSet().orEmpty()
+        val starts = state.obj("recurFrom")
+        return state.arr("recur").values().filterIsInstance<String>().filterTo(linkedSetOf()) { name ->
+            date >= starts.optString(name, "") && name !in skipped
+        }
     }
 
     fun isDone(record: JSONObject?, id: String): Boolean = if (id.startsWith("r:") || id.startsWith("c:")) {
@@ -235,6 +236,8 @@ class StudyPlan(val data: JSONObject) {
         }
 
         fun retireRecurringTask(state: JSONObject, name: String) {
+            if (name !in state.arr("recur").values()) return
+            val start = state.obj("recurFrom").optString(name, "")
             state.put("recur", JSONArray(state.arr("recur").values().filter { it != name }))
             state.optJSONObject("recurFrom")?.let { from ->
                 from.remove(name)
@@ -242,7 +245,9 @@ class StudyPlan(val data: JSONObject) {
             }
             val days = state.optJSONObject("days") ?: return
             days.namesList().forEach { date ->
+                if (date < start) return@forEach
                 val day = days.optJSONObject(date) ?: return@forEach
+                if (name in day.arr("sk").values()) return@forEach
                 val custom = day.optJSONArray("c") ?: return@forEach
                 val remaining = JSONArray()
                 var changed = false

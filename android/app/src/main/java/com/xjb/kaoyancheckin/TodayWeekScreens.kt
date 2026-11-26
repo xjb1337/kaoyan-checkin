@@ -2,13 +2,10 @@ package com.xjb.kaoyancheckin
 
 import android.content.ClipData
 import android.content.ClipboardManager
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,7 +29,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xjb.kaoyancheckin.ui.theme.webColors
-import kotlinx.coroutines.launch
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
@@ -66,9 +62,8 @@ internal fun weekStats(plan: StudyPlan, state: JSONObject, today: String, week: 
 }
 
 // Web vToday: .daynav, backup reminder, .minline, task list, hours, review and stage details.
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun TodayScreen(model: CheckinViewModel) {
+internal fun TodayScreen(model: CheckinViewModel, openStudyPlan: () -> Unit, openForecast: () -> Unit) {
     val state = model.state
     val date = model.selected
     val today = model.today
@@ -79,8 +74,6 @@ internal fun TodayScreen(model: CheckinViewModel) {
     val tasks = remember(model.plan, state, date, today) { model.plan.tasks(date, state, today) }
     val nextDate = StudyPlan.nextWithinLimit(date, model.today, 1)
     var deleteTarget by remember(date) { mutableStateOf<String?>(null) }
-    val tasksRequester = remember { BringIntoViewRequester() }
-    val scope = rememberCoroutineScope()
     DateNav(date, { model.selected = StudyPlan.addDays(date, -1) }, { nextDate?.let { model.selected = it } },
         { model.selected = model.today }, "今天", isToday, true, canGoNext = nextDate != null, maxDate = model.today,
         status = when {
@@ -94,10 +87,6 @@ internal fun TodayScreen(model: CheckinViewModel) {
         if (it <= model.today) model.selected = it
     }
     if (model.today < model.plan.start) Banner("🎯 开营 ${shortDate(model.plan.start)} · 还有 ${daysBetween(model.today, model.plan.start)} 天", "info")
-    val needsBackup = remember(state) { CheckinCore.needsBackup(state, System.currentTimeMillis()) }
-    if (needsBackup) {
-        Banner("💾 记得备份到手机外 ·", "info") { WebButton("去备份", { model.page = 3 }) }
-    }
     val maximum = if (phase.optInt("fs") == 1) 1 else 2
     val met = remember(model.plan, state, date, today) { model.plan.satisfied(date, state) }
     val past = date < model.today
@@ -105,10 +94,11 @@ internal fun TodayScreen(model: CheckinViewModel) {
     val doneTasks = remember(model.plan, record, tasks) { tasks.count { model.plan.isDone(record, it.id) } }
     val todayHours = record.optDouble("h", 0.0)
     val goalHours = remember(model.plan, state, date, today) { model.plan.goalHours(date, state, today) }
-    val streak = remember(model.plan, state, today) { model.plan.streak(state, today) }
     if (date >= model.plan.start && date <= model.today && tasks.isNotEmpty()) {
+        val streak = remember(model.plan, state, date) { model.plan.streak(state, date) }
         TodayHeroCard(
             phaseName = phase.optString("name"),
+            taskLabel = if (isToday) "今日任务" else "当天任务",
             streak = streak,
             minDone = minDone,
             minRequired = maximum,
@@ -117,17 +107,8 @@ internal fun TodayScreen(model: CheckinViewModel) {
             totalTasks = tasks.size,
             todayHours = todayHours,
             goalHours = goalHours,
+            openStudyPlan = openStudyPlan.takeIf { isToday && enabled && today < model.plan.exam(state) },
         )
-    }
-    if (isToday && model.loadError.isEmpty()) {
-        val summary = rememberTodayForecast(model.plan, state, today)
-        if (summary.isNotEmpty()) {
-            ForecastGlance(summary) { model.page = 2 }
-        } else if (!met && (tasks.isEmpty() || doneTasks < tasks.size)) {
-            Banner("预测 · 数据不足", "info") {
-                WebButton("去打卡", { scope.launch { tasksRequester.bringIntoView() } })
-            }
-        }
     }
     when {
         date < model.plan.start || date > model.today -> Unit
@@ -146,9 +127,8 @@ internal fun TodayScreen(model: CheckinViewModel) {
         else -> "最低线 $minDone/$maximum"
     }
     Section(
-        "今日任务 $doneTasks/${tasks.size}",
+        "${if (isToday) "今日任务" else "当天任务"} $doneTasks/${tasks.size}",
         badge = minBadge,
-        modifier = Modifier.bringIntoViewRequester(tasksRequester),
     ) {
         if (tasks.isEmpty() && date < model.plan.start) {
             Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
@@ -168,7 +148,7 @@ internal fun TodayScreen(model: CheckinViewModel) {
             val quickHour: (@Composable RowScope.() -> Unit)? = if (enabled && date <= model.today && task.tag in listOf("西综", "英语")) {
                 {
                     val currentHours = record.obj("sh").optDouble(task.tag, 0.0)
-                    Box(Modifier.heightIn(min = 32.dp)
+                    Box(Modifier.heightIn(min = 48.dp)
                         .clip(CircleShape)
                         .background(webColors.chipBlue)
                         .clickable(role = Role.Button) { model.adjustHours(date, task.tag, 0.5) }
@@ -199,7 +179,7 @@ internal fun TodayScreen(model: CheckinViewModel) {
                                     val increments = if (field == "n") listOf(20, 40) else listOf(40, 80)
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         increments.forEach { delta ->
-                                            Box(Modifier.heightIn(min = 36.dp)
+                                            Box(Modifier.heightIn(min = 48.dp)
                                                 .clip(RoundedCornerShape(6.dp))
                                                 .background(webColors.bg)
                                                 .border(1.dp, webColors.line, RoundedCornerShape(6.dp))
@@ -227,10 +207,20 @@ internal fun TodayScreen(model: CheckinViewModel) {
             }
         }
         optionalTasks.forEach { renderTask(it) }
-        AddField("加一条临时任务…", enabled, draftKey = "custom-$date") { name -> model.editDay(date) { day ->
-            require(day.arr("c").values().none { (it as JSONObject).optString("n") == name }) { "任务已存在" }
-            day.arr("c").put(JSONObject().put("n", name).put("d", false))
-        } }
+        val existingCustomNames = remember(tasks) {
+            tasks.filter { it.id.startsWith("r:") || it.id.startsWith("c:") }.map { it.label }.toSet()
+        }
+        AddField("加一条临时任务…", enabled, draftKey = "custom-$date", validate = { name ->
+            if (name in existingCustomNames) "当天已有同名任务" else null
+        }) { model.addCustomTask(date, it) }
+    }
+    val needsBackup = remember(state, today) { CheckinCore.needsBackup(state, System.currentTimeMillis()) }
+    if (needsBackup) {
+        Banner("记得备份到手机外", "info") { WebButton("去备份", { model.page = 3 }) }
+    }
+    if (isToday && model.loadError.isEmpty()) {
+        val summary = rememberTodayForecast(model.plan, state, today)
+        if (summary.isNotEmpty()) ForecastGlance(summary, openForecast)
     }
     Section("学习时长 · 按科目记录") {
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -336,6 +326,7 @@ internal fun TodayScreen(model: CheckinViewModel) {
 @Composable
 private fun TodayHeroCard(
     phaseName: String,
+    taskLabel: String,
     streak: Int,
     minDone: Int,
     minRequired: Int,
@@ -344,6 +335,7 @@ private fun TodayHeroCard(
     totalTasks: Int,
     todayHours: Double,
     goalHours: Double,
+    openStudyPlan: (() -> Unit)?,
 ) {
     val c = webColors
     val gradient = Brush.linearGradient(listOf(c.blue, lerp(c.blue, Color.Black, 0.24f)))
@@ -355,15 +347,18 @@ private fun TodayHeroCard(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(phaseName, Modifier.weight(1f), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-            Box(Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.18f)).padding(horizontal = 9.dp, vertical = 3.dp)) {
-                Text(if (met) "连续 $streak 天 · 已达标" else "连续 $streak 天", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(phaseName, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(if (met) "连续 $streak 天 · 已达标" else "连续 $streak 天", color = Color.White, fontSize = 12.sp)
+            }
+            if (openStudyPlan != null) {
+                WebButton("调整计划", openStudyPlan, Modifier.heightIn(min = 48.dp))
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(
                 "$minDone/$minRequired" to "最低线",
-                "$doneTasks/$totalTasks" to "今日任务",
+                "$doneTasks/$totalTasks" to taskLabel,
                 "${hours(todayHours)}/${hours(goalHours)}h" to "学习时长",
             ).forEach { (value, label) ->
                 Column(
@@ -372,8 +367,8 @@ private fun TodayHeroCard(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    Text(value, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
-                    Text(label, color = Color.White.copy(alpha = 0.82f), fontSize = 11.sp, maxLines = 1)
+                    Text(value, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
+                    Text(label, color = Color.White, fontSize = 12.sp, textAlign = TextAlign.Center)
                 }
             }
         }
@@ -410,7 +405,6 @@ private fun ForecastGlance(items: List<ForecastSummaryItem>, openDetails: () -> 
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                     Text(item.text, color = c.text, fontSize = 12.5.sp, lineHeight = 18.sp)
-                    item.method?.let { Text(it, color = c.sub, fontSize = 10.sp, lineHeight = 14.sp) }
                 }
                 Chip(item.status, color, background)
             }

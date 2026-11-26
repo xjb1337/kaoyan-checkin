@@ -1,6 +1,7 @@
 package com.xjb.kaoyancheckin
 
 import android.app.Application
+import android.database.sqlite.SQLiteDatabase
 import androidx.test.core.app.ApplicationProvider
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -88,10 +89,28 @@ class RepositoryIsolationTest {
             readRaw = { mainDoc },
             writeRaw = { mainDoc = it },
             readRecovery = { recoveryDoc },
-            writeRecovery = { recoveryDoc = it },
+            writeWithRecovery = { main, recovery -> mainDoc = main; recoveryDoc = recovery },
         )
         store.update { it.put("_recovery", """{"days":{}}""").put("bk", 42) }
         assertFalse(JSONObject(checkNotNull(store.read())).has("_recovery"))
         assertEquals("""{"days":{}}""", store.readRecovery())
+    }
+
+    @Test fun failedRecoveryWriteRollsBackTheMainDocument() = runBlocking {
+        val store = CheckinRepository.get(app)
+        store.update { it.put("bk", 1) }
+        SQLiteDatabase.openDatabase(app.getDatabasePath("checkin.db").path, null, SQLiteDatabase.OPEN_READWRITE).use {
+            it.execSQL("""
+                CREATE TRIGGER reject_recovery BEFORE INSERT ON document
+                WHEN NEW.id = 2 BEGIN SELECT RAISE(ABORT, 'test recovery write failure'); END
+            """.trimIndent())
+        }
+        val before = store.read()
+        val result = runCatching {
+            store.update { it.put("bk", 2).put("_recovery", CheckinCore.backupJSON(it)) }
+        }
+        assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("test recovery write failure"))
+        assertEquals(before, store.read())
+        assertEquals(null, store.readRecovery())
     }
 }

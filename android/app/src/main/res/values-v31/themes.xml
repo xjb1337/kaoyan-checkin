@@ -1,5 +1,5 @@
 <resources>
-    <style name="Theme.Checkin" parent="Theme.Checkin.Base">
+    <style name="Theme.Checkin" parent="Theme.Checkin.Navigation">
         <item name="android:windowSplashScreenBackground">@color/launch_background</item>
     </style>
 </resources>
